@@ -4,11 +4,13 @@ Panels:
     Name: Displays
     Property Tree Widget:
       Expanded:
+        - /Grid1
         - /RobotModel1/Description Topic1
         - /LaserScan1/Topic1
         - /Image1
+        - /Map1
       Splitter Ratio: 0.5
-    Tree Height: 115
+    Tree Height: 300
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -33,7 +35,7 @@ Visualization Manager:
         Z: 0
       Plane: XY
       Plane Cell Count: 50
-      Reference Frame: odom_gt
+      Reference Frame: base_footprint
       Value: true
     - Alpha: 0.6000000238418579
       Class: rviz_default_plugins/RobotModel
@@ -158,9 +160,7 @@ Visualization Manager:
           Value: true
         lidar_link:
           Value: true
-        map:
-          Value: true
-        odom_gt:
+        odom:
           Value: true
         right_gripper:
           Value: true
@@ -195,9 +195,8 @@ Visualization Manager:
             {}
           lidar_link:
             {}
-        map:
-          odom_gt:
-            {}
+        odom:
+          {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -260,13 +259,13 @@ Visualization Manager:
         Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /grid_map
+        Value: /map
       Update Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /grid_map_updates
+        Value: /map_updates
       Use Timestamp: false
       Value: true
   Enabled: true
@@ -320,14 +319,14 @@ Visualization Manager:
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 758
+  Height: 1014
   Hide Left Dock: false
   Hide Right Dock: false
   Image:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd0000000100000000000001560000029cfc0200000003fb000000100044006900730070006c006100790073010000003d000000f6000000c900fffffffb0000000a0049006d0061006700650100000139000000f30000002800fffffffb0000000a005600690065007700730100000232000000a7000000a400ffffff000003b50000029c00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd000000010000000000000156000003a0fc0200000003fb000000100044006900730070006c006100790073010000003b000001ad000000c700fffffffb0000000a0049006d00610067006501000001ee000000610000002800fffffffb0000000a00560069006500770073010000025500000186000000a000ffffff000005b0000003a000000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
-  Width: 1297
-  X: 381
-  Y: 119
+  Width: 1804
+  X: 2003
+  Y: 33

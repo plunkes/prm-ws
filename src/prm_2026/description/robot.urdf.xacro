@@ -355,7 +355,7 @@
       <topic>scan</topic>
       <always_on>true</always_on>
       <visualize>true</visualize>
-      <update_rate>5</update_rate>
+      <update_rate>15</update_rate>
       <ray>
         <scan>
           <horizontal>
