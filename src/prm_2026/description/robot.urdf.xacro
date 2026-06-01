@@ -355,11 +355,11 @@
       <topic>scan</topic>
       <always_on>true</always_on>
       <visualize>true</visualize>
-      <update_rate>15</update_rate>
+      <update_rate>30</update_rate>
       <ray>
         <scan>
           <horizontal>
-            <samples>360</samples>
+            <samples>1080</samples>
             <resolution>1.000000</resolution>
             <min_angle>0.000000</min_angle>
             <max_angle>6.280000</max_angle>
@@ -367,7 +367,7 @@
         </scan>
         <range>
           <min>0.120000</min>
-          <max>3.5</max>
+          <max>10.0</max>
           <resolution>0.015000</resolution>
         </range>
         <noise>
