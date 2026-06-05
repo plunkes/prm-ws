@@ -7,10 +7,12 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
 
 from scipy.spatial.transform import Rotation as R
-
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
+
+def clip(value, lower, upper):
+    return max(lower, min(value, upper))
 
 class ControleRobo(Node):
 
@@ -26,110 +28,110 @@ class ControleRobo(Node):
         self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         self.create_subscription(Image, '/robot_cam/colored_map', self.camera_callback, 10)
 
-        # Utilizado para converter imagens ROS -> OpenCV
         self.bridge = CvBridge()
+        
+        # Timer aumentado para 20Hz (0.05s) para controle mais suave e rápido
+        self.timer = self.create_timer(0.05, self.move_robot)
 
-        # Timer para enviar comandos continuamente
-        self.timer = self.create_timer(0.1, self.move_robot)
-
-        # Estado interno
+        # --- VARIÁVEIS DE ESTADO DO SENSOR ---
         self.obstaculo_a_frente = False
+        
+        # --- FILTROS DE VELOCIDADE (SUA PARTE) ---
+        self.linear_atual = 0.0
+        self.angular_atual = 0.0
+
+        # Limites Físicos de Velocidade (Deixando o robô rápido)
+        self.MAX_LINEAR_VEL = 0.8   # m/s (Antes era 0.1)
+        self.MAX_ANGULAR_VEL = 1.5  # rad/s (Antes era 0.3)
+
+        # Taxa de aceleração permitida por ciclo (Slew Rate)
+        self.MAX_LINEAR_ACCEL = 0.04  # m/s² por ciclo
+        self.MAX_ANGULAR_ACCEL = 0.1  # rad/s² por ciclo
+
+        # --- INTERFACE PARA A HEURÍSTICA (O GRUPO MUDA AQUI) ---
+        self.velocidade_linear_desejada = 0.0
+        self.velocidade_angular_desejada = 0.0
 
     def scan_callback(self, msg: LaserScan):
-        # Verifica uma faixa estreita ao redor de 0° (frente)
         num_ranges = len(msg.ranges)
         if num_ranges == 0:
             return
 
-        # Índices de -30° a +30° (equivalente a 330 até 30)
-        indices_frente = list(range(330, 360)) + list(range(0, 31))
-
-        # Filtra distancias
-        distancias = [msg.ranges[i] for i in indices_frente]
-
-        if distancias and min(distancias) < 0.5:
-            self.obstaculo_a_frente = True
-            self.get_logger().info('Obstáculo detectado a {:.2f}m à frente'.format(min(distancias)))
-        else:
-            self.obstaculo_a_frente = False
+        # Verifica obstáculo apenas na janela frontal (± 0.5 rad)
+        self.obstaculo_a_frente = False
+        for i in range(num_ranges):
+            angle = msg.angle_min + i * msg.angle_increment
+            if -0.5 <= angle <= 0.5: 
+                if 0.05 < msg.ranges[i] < 0.6: # Ignora o próprio chassi (<0.05) e detecta até 0.6m
+                    self.obstaculo_a_frente = True
+                    break
 
     def imu_callback(self, msg: Imu):
-        # # Extraindo o quaternion da mensagem
-        # orientation_q = msg.orientation
-        # quat = [
-        #     orientation_q.x,
-        #     orientation_q.y,
-        #     orientation_q.z,
-        #     orientation_q.w
-        # ]
-
-        # # Conversão para Euler usando SciPy
-        # r = R.from_quat(quat)
-        # roll, pitch, yaw = r.as_euler('xyz', degrees=True)
-
-        # # Exibindo resultados
-        # self.get_logger().info('IMU Data Received:')
-        # self.get_logger().info(
-        #     f'Orientation (Euler): Roll={roll:.2f}°, '
-        #     f'Pitch={pitch:.2f}°, Yaw={yaw:.2f}°'
-        # )
-        # self.get_logger().info(
-        #     f'Angular velocity: [{msg.angular_velocity.x:.2f}, '
-        #     f'{msg.angular_velocity.y:.2f}, {msg.angular_velocity.z:.2f}] rad/s'
-        # )
-        # self.get_logger().info(
-        #     f'Linear acceleration: [{msg.linear_acceleration.x:.2f}, '
-        #     f'{msg.linear_acceleration.y:.2f}, {msg.linear_acceleration.z:.2f}] m/s²'
-        # )
         pass
 
     def odom_callback(self, msg: Odometry):
-        # Mensagens de Odometria das rodas!
         pass
 
     def camera_callback(self, msg: Image):
-        # Converte mensagem ROS para imagem OpenCV (BGR)
+        # Exemplo de código de visão (pode ser modificado pelos seus colegas)
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-
-        # Define a cor-alvo em BGR
-        target_color = np.array([171, 242, 0])  # OBS: OpenCV usa BGR
-
-        # Cria máscara para cor exata
+        target_color = np.array([171, 242, 0])
         mask = cv2.inRange(frame, target_color, target_color)
-
-        # # Mostra a máscara em uma janela para debug
-        # cv2.imshow('Mascara de Blobs #00f2ab', mask)
-        # cv2.waitKey(1)  # Tempo mínimo para a janela atualizar (1 ms)
-
-        # Detecta contornos (blobs)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        # Conta e localiza blobs
-        self.get_logger().info(f'{len(contours)} blob(s) encontrados com cor #00f2ab:')
-        for i, cnt in enumerate(contours):
-            M = cv2.moments(cnt)
-            if M['m00'] != 0:
-                cx = int(M['m10'] / M['m00'])
-                cy = int(M['m01'] / M['m00'])
-                self.get_logger().info(f'  Blob {i+1}: posição (x={cx}, y={cy})')
+        # Lógica Básica de Comportamento para teste de movimentação
+        if self.obstaculo_a_frente:
+            # Desvio de emergência: Para de ir pra frente e gira rápido
+            self.velocidade_linear_desejada = 0.0
+            self.velocidade_angular_desejada = 0.8
+        elif len(contours) > 0:
+            # Achou a bandeira: Vai em direção a ela
+            self.velocidade_linear_desejada = 0.4
+            self.velocidade_angular_desejada = 0.0 # Aqui o grupo pode colocar um controle Proporcional para centralizar
+        else:
+            # Explorando (andando e girando levemente)
+            self.velocidade_linear_desejada = 0.3
+            self.velocidade_angular_desejada = -0.3
 
     def move_robot(self):
+        """
+        Módulo Cinético: Filtra as velocidades desejadas e envia comandos suaves aos motores.
+        """
         twist = Twist()
-        if not self.obstaculo_a_frente:
-            twist.linear.x = 0.1  # Move para frente
+
+        # 1. Filtro Rampa (Aceleração Suave) Linear
+        erro_linear = self.velocidade_linear_desejada - self.linear_atual
+        if abs(erro_linear) > self.MAX_LINEAR_ACCEL:
+            self.linear_atual += np.sign(erro_linear) * self.MAX_LINEAR_ACCEL
         else:
-            twist.angular.z = -0.3  # Gira em torno do proprio eixo
+            self.linear_atual = self.velocidade_linear_desejada
 
+        # 2. Filtro Rampa (Aceleração Suave) Angular
+        erro_angular = self.velocidade_angular_desejada - self.angular_atual
+        if abs(erro_angular) > self.MAX_ANGULAR_ACCEL:
+            self.angular_atual += np.sign(erro_angular) * self.MAX_ANGULAR_ACCEL
+        else:
+            self.angular_atual = self.velocidade_angular_desejada
+
+        # 3. Saturação Segura (Corte nos Limites)
+        self.linear_atual = clip(self.linear_atual, -self.MAX_LINEAR_VEL, self.MAX_LINEAR_VEL)
+        self.angular_atual = clip(self.angular_atual, -self.MAX_ANGULAR_VEL, self.MAX_ANGULAR_VEL)
+
+        # 4. Publicação
+        twist.linear.x = self.linear_atual
+        twist.angular.z = self.angular_atual
         self.cmd_vel_pub.publish(twist)
-
 
 def main(args=None):
     rclpy.init(args=args)
     node = ControleRobo()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

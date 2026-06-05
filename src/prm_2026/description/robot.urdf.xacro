@@ -69,7 +69,7 @@
       </geometry>
     </collision>
 
-    <xacro:box_inertia m="1" w="${base_width}" d="${base_length}" h="${base_height}"/>
+    <xacro:box_inertia m="0.2" w="${base_width}" d="${base_length}" h="${base_height}"/>
   </link>
 
   <!-- Definindo a Base do Robô (base footprint) -->
@@ -104,7 +104,7 @@
         </geometry>
       </collision>
 
-      <xacro:cylinder_inertia m="2.5" r="${wheel_radius}" h="${wheel_width}"/>
+      <xacro:cylinder_inertia m="0.2" r="${wheel_radius}" h="${wheel_width}"/>
     </link>
 
     <joint name="${prefix}_joint" type="continuous">
@@ -535,7 +535,7 @@
 
     <axis xyz="0 1 0"/>
     <limit effort="50.0" lower="-1.57075" upper="0.2" velocity="0.5"/>
-    <origin rpy="0 0 0" xyz="0.2 0 0.1"/>
+    <origin rpy="0 0 0" xyz="0.2 0 0.05"/>
 
     <parent link="base_link"/>
     <child link="gripper_pole"/>
