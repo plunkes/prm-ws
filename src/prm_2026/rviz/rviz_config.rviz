@@ -1,6 +1,6 @@
 Panels:
   - Class: rviz_common/Displays
-    Help Height: 70
+    Help Height: 76
     Name: Displays
     Property Tree Widget:
       Expanded:
@@ -9,8 +9,9 @@ Panels:
         - /LaserScan1/Topic1
         - /Image1
         - /Map1
+        - /Map1/Update Topic1
       Splitter Ratio: 0.5
-    Tree Height: 300
+    Tree Height: 602
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -160,6 +161,8 @@ Visualization Manager:
           Value: true
         lidar_link:
           Value: true
+        map:
+          Value: true
         odom:
           Value: true
         right_gripper:
@@ -195,6 +198,8 @@ Visualization Manager:
             {}
           lidar_link:
             {}
+        map:
+          {}
         odom:
           {}
       Update Interval: 0
@@ -234,7 +239,7 @@ Visualization Manager:
       Use rainbow: true
       Value: true
     - Class: rviz_default_plugins/Image
-      Enabled: true
+      Enabled: false
       Max Value: 1
       Median window: 5
       Min Value: 0
@@ -246,7 +251,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /robot_cam/colored_map
-      Value: true
+      Value: false
     - Alpha: 0.699999988079071
       Class: rviz_default_plugins/Map
       Color Scheme: map
@@ -262,7 +267,7 @@ Visualization Manager:
         Value: /map
       Update Topic:
         Depth: 5
-        Durability Policy: Volatile
+        Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /map_updates
@@ -296,7 +301,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 4.912381172180176
+      Distance: 18.606935501098633
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -324,9 +329,9 @@ Window Geometry:
   Hide Right Dock: false
   Image:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd000000010000000000000156000003a0fc0200000003fb000000100044006900730070006c006100790073010000003b000001ad000000c700fffffffb0000000a0049006d00610067006501000001ee000000610000002800fffffffb0000000a00560069006500770073010000025500000186000000a000ffffff000005b0000003a000000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd000000010000000000000156000003a0fc0200000002fb000000100044006900730070006c006100790073010000003b000002e1000000c700fffffffc00000322000000b9000000a000fffffffa000000000100000002fb0000000a005600690065007700730100000000ffffffff0000010000fffffffb0000000a0049006d0061006700650000000000000001560000005a00ffffff000005b0000003a000000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
   Width: 1804
-  X: 2003
+  X: 83
   Y: 33
