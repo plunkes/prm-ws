@@ -29,7 +29,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "controle_robo = meu_pacote_controle.controle_robo:main",
+            "controle_robo = bb8_control.controle_robo:main",
         ],
     },
 )

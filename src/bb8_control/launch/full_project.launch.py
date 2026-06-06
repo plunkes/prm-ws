@@ -12,7 +12,7 @@ def generate_launch_description():
     inclui_infraestrutura = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
-                pkg_control.find("bb8_control"), "launch", "simulacao_slam.launch.py"
+                pkg_control.find("bb8_control"), "launch", "simulation_slam.launch.py"
             )
         )
     )
@@ -20,9 +20,7 @@ def generate_launch_description():
     # Launch específico de controle (que ativa o nó controle_robo)
     inclui_controle = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(
-                pkg_control.find("bb8_control"), "launch", "controle.launch.py"
-            )
+            os.path.join(pkg_control.find("bb8_control"), "launch", "control.launch.py")
         )
     )
 
