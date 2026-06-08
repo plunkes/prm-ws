@@ -257,8 +257,8 @@ def generate_launch_description():
             # odom_gt,
             # robo_mapper,
             rviz_node,
-            #      relay_odom, # Nodos de redirecionamento de mensagens (Estamos usando apenas odom_gt agora)
-            relay_cmd_vel,  # Nodos de redirecionamento de mensagens
+            relay_odom,
+            relay_cmd_vel,
             #      controle
         ]
     )

@@ -18,7 +18,7 @@ Publishes:
 
 Parameters:
   flag_label_id    (int,   default 1)    – semantic label of the flag
-  camera_hfov_deg  (float, default 80.0) – horizontal field of view of the camera
+  camera_hfov_deg  (float, default 90.0) – horizontal field of view of the camera
 """
 
 import math

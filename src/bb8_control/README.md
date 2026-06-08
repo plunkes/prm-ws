@@ -1,293 +1,383 @@
-# BB8 Autonomous Robot - Exploration & Navigation System
+# bb8_control — Autonomous Exploration & Flag Capture
 
-This ROS 2 package implements a complete autonomous robot system featuring exploration, mapping, and flag collection using a differential-drive robot in Gazebo simulation.
+Autonomous robot package for ROS 2 Humble. The robot explores an arena using
+`explore_lite` frontier exploration until it detects a flag via semantic
+segmentation, then navigates directly to it using Nav2.
 
-## System Architecture
+---
 
-### Components
+## Quick Start
 
-1. **Vision Processor Node** (`vision_processor.py`)
-   - Processes semantic segmentation images from Gazebo camera
-   - Detects flag using semantic labels
-   - Publishes flag position to `/vision/flag_detection` topic
-
-2. **Control Node** (`controle_robo.py`)
-   - Main integration node combining all sensor data
-   - Manages movement control and velocity commands
-   - Implements exploration fallback heuristic when D* Lite fails
-   - Reactive obstacle avoidance using LIDAR
-
-3. **State Machine** (`maquina_estados.py`)
-   - Finite State Machine with 5 states:
-     - **EXPLORANDO**: Exploring unknown areas with D* Lite path planning
-     - **BANDEIRA_DETECTADA**: Flag detected, initiating approach
-     - **NAVIGANDO_PARA_BANDEIRA**: Navigating to flag using D* Lite
-     - **PROCURANDO_BANDEIRA**: Lost flag, performing 360° rotation
-     - **POSICIONANDO_PARA_COLETA**: Fine-tuning alignment for collection
-   - Smooth state transitions with consistent logging
-
-4. **D* Lite Planner** (`d_star_lite.py`)
-   - Optimal path planning algorithm
-   - Dynamically updates as robot moves and map changes
-   - Used for both exploration and navigation to flag
-
-5. **Frontier Explorer** (`explorador.py`)
-   - Identifies frontier cells (free cells adjacent to unknown areas)
-   - Selects closest frontier as exploration target
-
-6. **Scan Filter Node** (C++) - in `bb8_slam` package
-   - Processes LIDAR scan data
-   - Replaces infinite readings with maximum range (3.5m)
-   - Ensures proper map generation with clear areas
-
-### Key Features
-
-- **Exploration Fallback Heuristic**: When D* Lite fails, robot uses local map analysis to identify and move towards unknown cells
-- **Reactive Obstacle Avoidance**: LIDAR-based emergency obstacle detection and avoidance
-- **Vision-based Flag Detection**: Uses semantic segmentation to reliably detect flag
-- **Smooth Motion Control**: Acceleration ramping (slew rate filtering) for smooth robot motion
-- **Robust State Management**: Clear state transitions with timeout handling
-
-## Building the System
-
-### Prerequisites
+### Install dependencies
 
 ```bash
-# ROS 2 Humble
-# Install required packages:
-sudo apt-get install ros-humble-slam-toolbox ros-humble-nav2-msgs
+# ROS navigation / SLAM
+sudo apt install ros-humble-slam-toolbox \
+                 ros-humble-nav2-bringup \
+                 ros-humble-nav2-msgs \
+                 ros-humble-topic-tools
+
+# Frontier exploration
+sudo apt install ros-humble-explore-lite
 ```
 
 ### Build
 
 ```bash
-cd /path/to/prm_ws
-colcon build --packages-select bb8_slam bb8_control
+cd ~/prm_ws
+colcon build --symlink-install --packages-select bb8_control
 source install/setup.bash
 ```
 
-## Launching the System
-
-### Full System Launch (Simulation + SLAM + Control)
+### Launch the full stack
 
 ```bash
-ros2 launch bb8_control full_project.launch.py
+ros2 launch bb8_control main_exploration.launch.py
 ```
 
-This launch command runs:
-1. Gazebo simulator with the robot
-2. SLAM Toolbox with scan filtering
-3. Vision processor node
-4. Main control node
-
-### Individual Component Launch
+**With verbose (DEBUG) logging:**
 
 ```bash
-# Only SLAM and scan filtering
-ros2 launch bb8_slam slam_launch.py
-
-# Only control (requires SLAM and simulation already running)
-ros2 launch bb8_control control.launch.py
-
-# Only simulation
-ros2 launch prm_2026 simulation_slam.launch.py
+ros2 launch bb8_control main_exploration.launch.py verbose:=true
 ```
 
-## ROS 2 Topics
-
-### Subscribed Topics
-
-- `/scan` (sensor_msgs/LaserScan): Raw LIDAR data
-- `/robot_cam/colored_map` (sensor_msgs/Image): RGB camera image
-- `/robot_cam/segmentation` (sensor_msgs/Image): Semantic segmentation image
-- `/diff_drive_base_controller/odom` (nav_msgs/Odometry): Robot odometry
-- `/map` (nav_msgs/OccupancyGrid): SLAM-generated occupancy map
-- `/vision/flag_detection` (geometry_msgs/Pose2D): Flag detection from vision node
-
-### Published Topics
-
-- `/diff_drive_base_controller/cmd_vel_unstamped` (geometry_msgs/Twist): Velocity commands to robot
-- `/scan_out` (sensor_msgs/LaserScan): Filtered scan data (published by scan filter node)
-- `/vision/flag_detection` (geometry_msgs/Pose2D): Flag detection data (published by vision processor)
-
-## System Parameters
-
-### Robot Physical Limits
-
-```
-MAX_LINEAR_VEL:    0.8 m/s
-MAX_ANGULAR_VEL:   1.5 rad/s
-MAX_LINEAR_ACCEL:  0.04 m/s per control cycle (20Hz = 0.8 m/s²)
-MAX_ANGULAR_ACCEL: 0.1 rad/s per control cycle
-```
-
-### Distance Thresholds
-
-```
-DISTANCIA_COLETA:        0.4 m (ideal distance for flag collection)
-OBSTACLE_AVOIDANCE_DIST: 0.4 m (emergency avoidance trigger)
-LIDAR_SCAN_WINDOW:       ±0.5 rad (front-facing scan region)
-```
-
-### Explorer Parameters
-
-```
-FRONTIER_SEARCH_RADIUS: 5 cells (for fallback heuristic)
-ROTATION_TIMEOUT:       260 ticks at 20Hz ≈ 13 seconds (360° search)
-```
-
-## Algorithm Details
-
-### Exploration Strategy
-
-1. **Primary Method**: Frontier-based exploration using D* Lite
-   - Robot identifies unknown cells in occupancy map
-   - D* Lite computes shortest path to nearest frontier
-   - Robot follows path while updating map continuously
-
-2. **Fallback Method**: Reactive local heuristic (when D* Lite fails)
-   - Analyzes 5-cell radius around robot
-   - Computes centroid of unknown cells
-   - Generates target angle to centroid
-   - Uses proportional control to rotate and move towards unknown area
-
-### Motion Control Pipeline
-
-```
-Desired Velocities (FSM)
-    ↓
-Slew Rate Filtering (smooth ramps)
-    ↓
-Safety Saturation (clip to limits)
-    ↓
-Publish to /cmd_vel
-```
-
-### Obstacle Avoidance
-
-- **Detection**: LIDAR readings within ±0.5 rad at front, range 0.12-0.6m
-- **Response**: When obstacle < 0.4m, rotate right at 0.6 rad/s
-- **Emergency Mode**: Triggers immediately when distance < 0.4m during navigation
-
-## Coordinate Systems
-
-- **Map Frame**: Global occupancy grid coordinates (integer grid)
-- **Odom Frame**: Robot odometry frame (continuous meters)
-- **Robot Frame**: Local robot-centered frame (0,0 at center)
-- **Image Frame**: Camera image pixel coordinates
-
-Grid to meter conversion:
-```
-x_meters = (x_grid * resolution) + origin_x
-y_meters = (y_grid * resolution) + origin_y
-```
-
-Default resolution: 0.05 m/cell
-
-## Debugging & Monitoring
-
-### ROS 2 CLI Commands
+**Different world:**
 
 ```bash
-# Monitor main state machine
-ros2 topic echo /map -c 5  # View first 5 map updates
-
-# Watch LIDAR data
-ros2 topic echo /scan --no-arr | head -30
-
-# Check TF transforms
-ros2 run tf2_tools view_frames.py
-
-# Record rosbag for offline analysis
-ros2 bag record /map /scan /tf /tf_static /vision/flag_detection -o exploration_run
-
-# Playback recording
-ros2 bag play exploration_run
+ros2 launch bb8_control main_exploration.launch.py world:=arena_paredes.sdf
 ```
 
-### Log Output Examples
+---
+
+## Behavior Control Flow
 
 ```
-[INFO] [controle_robo]: ESTADO: EXPLORANDO | Pos Grid: (50, 50) | Alvo: (65, 45) | Próximo Passo: (52, 50)
-[WARN] [controle_robo]: D* failed. Alvo: (65, 45). Using fallback heuristic.
-[INFO] [controle_robo]: Fallback: Found unknowns at angle 45.2°, error=5.8°
-[INFO] [FSM] Flag detected! Transitioning to BANDEIRA_DETECTADA.
-[INFO] [FSM] Flag confirmed. Transitioning to NAVIGANDO_PARA_BANDEIRA.
+┌─────────────────────────────────────────────────────────────────┐
+│                         EXPLORANDO                              │
+│  explore_lite ACTIVE → sends NavigateToPose goals to Nav2       │
+│  Watchdog: if no movement ≥ 0.20 m for 12 s →                   │
+│    1. Deactivate explore_lite                                    │
+│    2. Spin 6 s (recovery)   ──── back to explore_lite ACTIVE ───┤
+│                                                                  │
+│  Flag detected by /vision/flag_detection? ─────────────────────►│
+└──────────────────────────────────┬──────────────────────────────┘
+                                   │  flag seen
+                                   ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    BANDEIRA_DETECTADA                           │
+│  Deactivate explore_lite (lifecycle TRANSITION_DEACTIVATE)      │
+│  explore_lite cancels its current Nav2 goal                     │
+│  Flag map position estimated from LIDAR + bearing               │
+└──────────────────────────────────┬──────────────────────────────┘
+                                   │  position known
+                                   ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  NAVIGANDO_PARA_BANDEIRA                        │
+│  FSM sends NavigateToPose goal to Nav2                          │
+│  Goal = point COLETA_DISTANCE + 0.2 m in front of flag          │
+│  Refreshes goal every 20 ticks if flag position updates         │
+│                                                                  │
+│  front_dist ≤ 0.45 m ──────────────────────────────────────────►│
+│  flag lost ─────────────────────────────────────────────────────┤
+└────────────────────────┬─────────────────────┬──────────────────┘
+              flag lost  │                     │  close enough
+                         ▼                     ▼
+┌──────────────────────────────┐  ┌────────────────────────────────┐
+│     PROCURANDO_BANDEIRA      │  │   POSICIONANDO_PARA_COLETA     │
+│  Spin in place at 1.5 rad/s  │  │  Proportional bearing align    │
+│  Up to 6 s (30 ticks)        │  │  Stop when |bearing| < 5°      │
+│                              │  │  Announce: VITORIA!            │
+│  flag reacquired? ──────────►│  │  (stay stopped)                │
+│  timeout? → EXPLORANDO       │  │  flag lost? → PROCURANDO       │
+└──────────────────────────────┘  └────────────────────────────────┘
 ```
 
-## Troubleshooting
+**Key FSM parameters (in `controle_robo.py`):**
 
-### Problem: Robot Doesn't Move
+| Constant | Value | Meaning |
+|---|---|---|
+| `COLETA_DISTANCE` | 0.45 m | LIDAR front distance that triggers POSICIONANDO |
+| `WATCHDOG_DIST` | 0.20 m | Minimum movement to reset the idle timer |
+| `WATCHDOG_TIMEOUT_S` | 12.0 s | Idle time before recovery spin |
+| `RECOVERY_SPIN_S` | 6.0 s | Recovery spin duration |
+| `RESEND_TICKS` | 20 | FSM ticks between Nav2 goal refreshes |
+| `ROTATE_SPEED` | 1.5 rad/s | Spin rate for PROCURANDO and POSICIONANDO |
+| `SEARCH_TICKS_360` | 30 ticks | ~6 s for full 360° search in PROCURANDO |
 
-**Symptoms**: Robot stays in place, `Próximo Passo: None`
+---
 
-**Solutions**:
-1. Check `/map` topic is publishing occupancy grid
-2. Verify SLAM is running: `ros2 topic echo /map`
-3. Ensure `/scan` is filtered correctly: `ros2 topic echo /scan_out`
-4. Check `posicao_robo_grid` is being computed in odom_callback
+## Known Issues & Limitations
 
-### Problem: Robot Spins in Place
+**1. Watchdog fires before Nav2 recovery completes**
+The FSM watchdog triggers after 12 s of no movement (`WATCHDOG_TIMEOUT_S`).
+Nav2's own recovery behaviors (backup + spin) can take 5–8 s. If the robot gets
+stuck in an obstacle, Nav2 starts recovering, but at 12 s the FSM also fires its
+own deactivate + spin recovery. The two recovery mechanisms overlap, which can
+cause erratic motion. The `progress_timeout` in `explore.yaml` is set to 15 s
+and is effectively never reached because the FSM watchdog always preempts it.
 
-**Symptoms**: High `velocidade_angular_desejada`, no forward motion
+**2. Race condition between async deactivation and recovery spin**
+`_deactivate_explore()` sends an async lifecycle service call. Before the
+service response arrives (≈100 ms), the FSM immediately starts publishing spin
+velocity on `/diff_drive_base_controller/cmd_vel_unstamped`. If explore_lite's
+Nav2 goal is still active during this window, Nav2 also publishes to
+`/cmd_vel` → relay → same topic. Last writer wins, causing brief chaotic motion.
 
-**Causes**:
-- D* Lite returning path that requires large rotation
-- Frontier behind robot with high angular penalty
+**3. Nav2 may not reach within `COLETA_DISTANCE` of the flag**
+The Nav2 goal is offset 0.65 m from the estimated flag position. Nav2's
+`xy_goal_tolerance` is 0.25 m, so it considers the goal "reached" when within
+0.25 m of the offset point (≈0.90 m from flag). The LIDAR transition to
+POSICIONANDO requires `front_dist ≤ 0.45 m`. If Nav2 stops the robot at
+0.90 m and the flag is not in the front ±30° LIDAR cone, the robot can get
+stuck resending the same Nav2 goal indefinitely without triggering POSICIONANDO.
 
-**Solutions**:
-1. Check frontier selection: verify `encontrar_alvo_desconhecido` is finding fronts
-2. Reduce `KP_ANGULAR` (line 381 in controle_robo.py) for gentler turns
+**4. Flag position drifts while approaching**
+`_flag_map_x/y` is updated every FSM tick while the flag is visible. As the
+robot approaches, the bearing angle and LIDAR range at that angle change, so
+the estimated flag map position shifts. This causes the Nav2 goal to be resent
+to a different location every 20 ticks (4 s), forcing Nav2 to replan frequently.
 
-### Problem: Flag Never Detected
+**5. No obstacle check during direct velocity control**
+When the FSM publishes velocity directly (PROCURANDO, POSICIONANDO, recovery
+spin), it does not check `_front_dist`. The robot can spin into nearby walls
+at 1.5 rad/s with no avoidance.
 
-**Symptoms**: Robot explores but FSM never transitions to `NAVIGANDO_PARA_BANDEIRA`
+**6. Single-frame flag detection (no hysteresis)**
+One camera frame with the flag label immediately triggers `BANDEIRA_DETECTADA`.
+A single false-positive pixel in the semantic segmentation abandons exploration.
 
-**Causes**:
-1. Vision processor not running
-2. Semantic segmentation not working
-3. Wrong camera topic name
+---
 
-**Solutions**:
-1. Verify vision processor node: `ros2 node list | grep vision`
-2. Check if `/vision/flag_detection` is publishing: `ros2 topic echo /vision/flag_detection`
-3. Debug image topic: `ros2 run image_view image_view image:=/robot_cam/segmentation`
+## Sub-Launch Manual
 
-## Performance Metrics
+Each sub-launch can be run independently for isolated testing.
+All accept `verbose:=true` to enable DEBUG logging.
 
-### Typical Exploration Performance
+### `slam.launch.py` — SLAM only
 
-- **Exploration Coverage**: ~80% of map in 3-5 minutes (simulation)
-- **Path Planning Latency**: ~50-100ms (D* Lite + motion control cycle)
-- **Obstacle Detection Response**: <100ms (LIDAR at 10Hz + 20Hz control)
-- **Flag Acquisition Time**: 10-30 seconds after first detection
+Starts `async_slam_toolbox_node` with the project's parameter overrides.
+Run this when the simulation and robot are already up.
 
-### Computational Resources
+```bash
+ros2 launch bb8_control slam.launch.py
+# Then verify:
+ros2 topic echo /map --once
+```
 
-- **Control Loop Frequency**: 20 Hz
-- **CPU Usage**: ~15-25% (single core, simulation)
-- **Memory**: ~150-200 MB (Python + ROS 2)
+### `nav2.launch.py` — Nav2 navigation stack only
 
-## Future Improvements
+Starts the Nav2 planner, controller, behavior server, bt_navigator, and
+velocity smoother. Assumes `/map` and the `map→odom` TF are already available.
 
-1. **Multi-Robot Exploration**: Coordinate multiple robots sharing a common map
-2. **Semantic SLAM**: Integrate semantic understanding into map generation
-3. **Machine Learning**: Train neural network for faster frontier selection
-4. **Dynamic Obstacles**: Handle moving obstacles in real environment
-5. **Battery Management**: Plan routes considering energy constraints
+```bash
+ros2 launch bb8_control nav2.launch.py
+# Check all lifecycle nodes are active:
+ros2 lifecycle get /bt_navigator
+```
 
-## References
+### `explore.launch.py` — explore_lite only
 
-- D* Lite Algorithm: Koenig & Likhachev (2002)
-- ROS 2 Navigation: https://navigation.ros.org/
-- SLAM Toolbox: https://github.com/SteveMacenski/slam_toolbox
+Starts `explore_node` (lifecycle) + `lifecycle_manager_explore` (autostart).
+Requires Nav2's global costmap to be publishing.
 
-## Authors
+```bash
+ros2 launch bb8_control explore.launch.py
+# Watch frontier markers in RViz (/explore/frontiers)
+# Check lifecycle state:
+ros2 lifecycle get /explore_node
+```
 
-- Created for Trabalho 1 - Sistema de Exploração, Navegação e Controle da Missão
-- University of São Paulo (USP)
-- 2026
+### `perception.launch.py` — Vision processor only
 
-## License
+Starts the semantic segmentation decoder node.
+Requires the Gazebo camera bridge (`/robot_cam/labels_map`) to be active.
 
-Apache License 2.0
+```bash
+ros2 launch bb8_control perception.launch.py
+# Verify flag detection:
+ros2 topic echo /vision/flag_detection
+ros2 topic echo /vision/flag_bearing
+```
+
+### `main_exploration.launch.py` — Full stack
+
+Aggregates all sub-launches plus Gazebo simulation and the master FSM node.
+This is the primary entry point.
+
+```bash
+ros2 launch bb8_control main_exploration.launch.py
+ros2 launch bb8_control main_exploration.launch.py verbose:=true
+```
+
+---
+
+## Diagnostics
+
+Run the diagnostic node in a second terminal **while the robot is running**:
+
+```bash
+ros2 launch bb8_control diagnostics.launch.py
+```
+
+Every 10 seconds it prints a health summary. WARN/ERROR events are also
+printed immediately when thresholds are crossed.
+
+### What it monitors
+
+| Check | Threshold | Failure mode it catches |
+|---|---|---|
+| LIDAR near-miss | < 0.18 m | Robot approaching obstacle dangerously |
+| LIDAR collision | < 0.12 m | Robot has likely made contact |
+| Stuck detection | < 0.10 m movement in 10 s | Robot stopped in front of obstacle |
+| Zero velocity | cmd_vel ≈ 0 for > 8 s | explore_lite/Nav2 not driving the robot |
+| Map update rate | < 0.3 Hz | SLAM Toolbox stalled |
+| LIDAR rate | < 5 Hz | LIDAR bridge broken |
+| Odometry rate | < 5 Hz | Odometry bridge broken |
+| Map unknown % | > 80 % after 60 s | Exploration not making progress |
+
+### Example healthy output
+
+```
+--------------------------------------------------------------
+  BB8 Diagnostics  (runtime 45 s)
+--------------------------------------------------------------
+  TOPIC RATES
+    /scan    20.0 Hz  OK
+    /odom    50.0 Hz  OK
+    /map      0.8 Hz  OK
+  COLLISION PROXIMITY
+    Current min LIDAR:  0.412 m
+    Session min LIDAR:  0.312 m
+    Near-miss events (< 0.18 m):  0
+    Collision events  (< 0.12 m):  0
+  MOTION
+    Total dist travelled:  3.42 m
+    Avg linear velocity:   0.521 m/s
+    Stuck episodes (>25s idle):  0
+    Zero-vel episodes (>8s stopped):  1
+  MAP / SLAM
+    Unknown cells:  71.3 %
+    Explored area:  4.6 m²
+  VISION
+    /vision/flag_bearing received:  NO — perception may be down
+--------------------------------------------------------------
+```
+
+---
+
+## RViz Configuration
+
+RViz2 launches automatically via `carrega_robo.launch.py`. Add these displays
+manually for full debugging visibility:
+
+| Display type | Topic / Source | Notes |
+|---|---|---|
+| Map | `/map` | SLAM occupancy grid |
+| MarkerArray | `/explore/frontiers` | Current frontier list |
+| LaserScan | `/scan` | LIDAR readings |
+| Path | `/plan` | Nav2 planned path |
+| TF | — | Check `map→odom→base_link` chain |
+| Image (Raw) | `/robot_cam/colored_map` | Segmentation colour overlay |
+
+Set **Fixed Frame** to `map`.
+
+---
+
+## Testing & Debugging
+
+### Monitor FSM state transitions
+
+```bash
+ros2 topic echo /rosout | grep "\[FSM\]"
+```
+
+### Verify explore_lite is running
+
+```bash
+ros2 lifecycle get /explore_node          # Expected: Active
+ros2 topic hz /explore/frontiers          # should publish ~0.33 Hz
+```
+
+### Force a lifecycle pause/resume manually
+
+```bash
+ros2 lifecycle set /explore_node deactivate
+ros2 lifecycle set /explore_node activate
+```
+
+### Inspect Nav2 goal traffic
+
+```bash
+ros2 topic echo /navigate_to_pose/_action/status
+```
+
+### Check the TF tree
+
+```bash
+ros2 run tf2_tools view_frames
+# Must see: world → map → odom → base_link
+```
+
+### Record a run for offline analysis
+
+```bash
+ros2 bag record /map /scan /tf /tf_static \
+    /vision/flag_detection /vision/flag_bearing \
+    /explore/frontiers /plan /rosout \
+    /diff_drive_base_controller/cmd_vel_unstamped \
+    -o exploration_run
+```
+
+### Expected log sequence (healthy run)
+
+```
+[controle_robo]: ControleRoboFSM started – EXPLORANDO
+[controle_robo]: [DIAG] All primary systems GO
+[explore_node]:  Received costmap, now running
+[controle_robo]: [MAP] First map: 384×384 @ 0.050 m/cell
+... (robot explores for N minutes) ...
+[vision_processor]: Flag @ (320, 240)px  bearing=2.3°  area=480px
+[controle_robo]: [FSM] EXPLORANDO → BANDEIRA_DETECTADA
+[controle_robo]: [EXPLORE] Deactivate request sent to explore_lite
+[controle_robo]: [FSM] BANDEIRA_DETECTADA → NAVIGANDO_PARA_BANDEIRA
+[controle_robo]: [Nav2] goal → (3.45, -1.20)
+[controle_robo]: [Nav2] goal SUCCEEDED
+[controle_robo]: [FSM] NAVIGANDO_PARA_BANDEIRA → POSICIONANDO_PARA_COLETA
+[controle_robo]: ============================================================
+[controle_robo]:     VITORIA!  BANDEIRA CAPTURADA!
+[controle_robo]:     BB8 completou a missao com sucesso!
+```
+
+### Troubleshooting
+
+**Robot doesn't move at all**
+
+- Check: `ros2 topic echo /map --once` (SLAM running?)
+- Check: `ros2 lifecycle get /explore_node` (should be `Active`)
+- Check: `ros2 topic echo /navigate_to_pose/_action/status` (Nav2 receiving goals?)
+
+**explore_lite logs "All frontiers traversed/tried out, stopping"**
+
+- The FSM watchdog detects the stall after 12 s and triggers a recovery spin
+  (6 s), then reactivates explore_lite.
+- If no new frontiers appear after several cycles, the arena is fully mapped.
+
+**Flag never detected**
+
+- Check: `ros2 topic echo /vision/flag_detection` (theta=1.0 means detected)
+- Check: `ros2 topic hz /robot_cam/labels_map` (camera bridge running?)
+- Manually inspect: `ros2 run image_view image_view image:=/robot_cam/colored_map`
+
+**Nav2 rejects goals**
+
+- Ensure Nav2 lifecycle nodes are active: `ros2 lifecycle get /bt_navigator`
+- Check costmap inflation: reduce `inflation_radius` in `nav2_params.yaml` if
+  the robot is in a tight arena and goals fall inside inflated obstacles.
+
+**Robot stops in front of obstacle and does not recover**
+
+- This is the primary known issue (see Known Issues #1 and #2 above).
+- Run the diagnostic node to capture stuck-episode counts and zero-vel duration.
+- Check `/rosout` for `[EXPLORE] No movement for … Starting recovery spin`.
+- If the watchdog is firing but the robot still doesn't recover, the recovery
+  spin direction may be pushing it further into the obstacle.

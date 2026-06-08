@@ -20,6 +20,12 @@
   <exec_depend>python3-opencv</exec_depend>
   <!-- cmd_vel topic bridge: sudo apt install ros-humble-topic-tools -->
   <exec_depend>topic_tools</exec_depend>
+  <!-- Frontier exploration: sudo apt install ros-humble-explore-lite -->
+  <exec_depend>explore_lite</exec_depend>
+  <!-- Lifecycle management for explore_lite pause/resume -->
+  <exec_depend>lifecycle_msgs</exec_depend>
+  <!-- Lifecycle manager to auto-activate explore_node on startup -->
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

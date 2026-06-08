@@ -1,0 +1,25 @@
+explore_node:
+  ros__parameters:
+    robot_base_frame: base_link
+    costmap_topic: /global_costmap/costmap
+    costmap_updates_topic: /global_costmap/costmap_updates
+    visualize: true
+
+    # 1.0 Hz: replan frontiers every second so new map areas are picked up quickly.
+    planner_frequency: 1.0
+
+    # 25 s: longer than the FSM watchdog cycle (12 s idle + 1.6 s backup + 6 s spin)
+    # so explore_lite never times out mid-recovery.
+    progress_timeout: 25.0
+
+    # Lower potential_scale + higher gain_scale: prefer large open-area frontiers
+    # over nearby wall-adjacent ones. This steers the robot toward gaps between
+    # obstacles rather than straight at walls.
+    potential_scale: 2.0
+    gain_scale: 2.0
+    transform_tolerance: 0.3
+
+    min_frontier_size: 0.25
+
+    return_to_init: false
+    use_relative_frontiers: false

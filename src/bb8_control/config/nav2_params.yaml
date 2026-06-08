@@ -66,37 +66,33 @@ controller_server:
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
       required_movement_radius: 0.5
-      movement_time_allowance: 10.0
+      movement_time_allowance: 5.0
 
     goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.25
+      xy_goal_tolerance: 0.15
       theta_goal_tolerance: 0.25
 
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       desired_linear_vel: 0.8
-      lookahead_dist: 0.9
+      lookahead_dist: 0.6
       min_approach_linear_velocity: 0.25
       approach_velocity_scaling_dist: 0.5
       use_velocity_scaled_lookahead_dist: true
-      min_lookahead_dist: 0.5
-      max_lookahead_dist: 1.8
+      min_lookahead_dist: 0.3
+      max_lookahead_dist: 1.2
       lookahead_time: 1.5
       rotate_to_heading_angular_vel: 1.8
-      # 1.2 rad ≈ 69° – stop translating only if wildly off course
       rotate_to_heading_min_angle: 1.2
       transform_tolerance: 0.3
       use_collision_detection: true
-      # Disabling curvature scaling – this was the main cause of slowing near walls
       use_regulated_linear_velocity_scaling: false
       use_cost_regulated_linear_velocity_scaling: false
       cost_scaling_gain: 1.0
       inflation_cost_scaling_gain: 3.0
 
-# behavior_server was called recoveries_server in pre-Humble Nav2.
-# Plugin namespace also changed: nav2_recoveries -> nav2_behaviors.
 behavior_server:
   ros__parameters:
     use_sim_time: True
@@ -158,13 +154,12 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
-      # Polygon covers body (arm is folded down on startup by controle_robo)
       footprint: "[[-0.25, -0.22], [-0.25, 0.22], [0.25, 0.22], [0.25, -0.22]]"
       plugins: ["obstacle_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 2.0
-        inflation_radius: 0.30
+        cost_scaling_factor: 3.5
+        inflation_radius: 0.45
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -183,8 +178,8 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
-      update_frequency: 1.0
-      publish_frequency: 1.0
+      update_frequency: 2.0
+      publish_frequency: 2.0
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: True
@@ -211,8 +206,8 @@ global_costmap:
           obstacle_min_range: 0.0
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 2.0
-        inflation_radius: 0.30
+        cost_scaling_factor: 3.5
+        inflation_radius: 0.45
 
 # lifecycle_manager_navigation manages only the navigation stack.
 # Localization (map→odom TF) is provided by slam_toolbox, not AMCL.
