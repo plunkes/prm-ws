@@ -31,7 +31,7 @@ from geometry_msgs.msg import Pose2D
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, String
 
 
 class VisionProcessorNode(Node):
@@ -57,8 +57,10 @@ class VisionProcessorNode(Node):
             Image, "/robot_cam/labels_map", self._cb_labels, qos
         )
 
-        self._pub_detection = self.create_publisher(Pose2D, "/vision/flag_detection", 10)
-        self._pub_bearing = self.create_publisher(Float32, "/vision/flag_bearing", 10)
+        self._pub_detection  = self.create_publisher(Pose2D,  "/vision/flag_detection", 10)
+        self._pub_bearing    = self.create_publisher(Float32, "/vision/flag_bearing",   10)
+        # Scene classification: "objective" | "obstacle" | "clear"
+        self._pub_scene_class = self.create_publisher(String, "/vision/scene_class", 10)
 
         self._bridge = CvBridge()
         self.get_logger().info(
@@ -102,12 +104,17 @@ class VisionProcessorNode(Node):
                 f"Flag @ ({cx:.0f}, {cy:.0f})px  bearing={math.degrees(bearing):.1f}°  area={area}px",
                 throttle_duration_sec=1.0,
             )
+            scene_class = "objective"
         else:
             pose_msg.theta = 0.0
             bearing_msg.data = 0.0
+            # Any labelled pixel that is not the flag is an obstacle
+            obstacle_detected = bool(np.any((img > 0) & ~flag_mask))
+            scene_class = "obstacle" if obstacle_detected else "clear"
 
         self._pub_detection.publish(pose_msg)
         self._pub_bearing.publish(bearing_msg)
+        self._pub_scene_class.publish(String(data=scene_class))
 
     def _decode_label_image(self, msg: Image):
         """

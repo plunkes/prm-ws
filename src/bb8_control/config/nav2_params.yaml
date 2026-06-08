@@ -78,16 +78,19 @@ controller_server:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
       desired_linear_vel: 0.8
       lookahead_dist: 0.9
-      min_approach_linear_velocity: 0.08
+      min_approach_linear_velocity: 0.25
+      approach_velocity_scaling_dist: 0.5
       use_velocity_scaled_lookahead_dist: true
       min_lookahead_dist: 0.5
       max_lookahead_dist: 1.8
       lookahead_time: 1.5
       rotate_to_heading_angular_vel: 1.8
-      rotate_to_heading_min_angle: 0.785  # 45° – only spin-to-heading if really off
+      # 1.2 rad ≈ 69° – stop translating only if wildly off course
+      rotate_to_heading_min_angle: 1.2
       transform_tolerance: 0.3
       use_collision_detection: true
-      use_regulated_linear_velocity_scaling: true
+      # Disabling curvature scaling – this was the main cause of slowing near walls
+      use_regulated_linear_velocity_scaling: false
       use_cost_regulated_linear_velocity_scaling: false
       cost_scaling_gain: 1.0
       inflation_cost_scaling_gain: 3.0
@@ -160,8 +163,8 @@ local_costmap:
       plugins: ["obstacle_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.55
+        cost_scaling_factor: 2.0
+        inflation_radius: 0.30
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -208,8 +211,8 @@ global_costmap:
           obstacle_min_range: 0.0
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.55
+        cost_scaling_factor: 2.0
+        inflation_radius: 0.30
 
 # lifecycle_manager_navigation manages only the navigation stack.
 # Localization (map→odom TF) is provided by slam_toolbox, not AMCL.

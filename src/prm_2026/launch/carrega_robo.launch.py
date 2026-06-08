@@ -2,6 +2,7 @@ from launch import LaunchDescription
 from launch.substitutions import PathJoinSubstitution, Command
 from launch.actions import ExecuteProcess, RegisterEventHandler
 from launch.event_handlers import OnProcessExit
+from launch_ros.parameter_descriptions import ParameterValue
 
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
@@ -41,12 +42,14 @@ def generate_launch_description():
         [FindPackageShare("prm_2026"), "config", "controller_config.yaml"]
     )
 
+    robot_description_param = ParameterValue(robot_urdf_final, value_type=str)
     robot_state_publisher_node = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
-        parameters=[{"robot_description": robot_urdf_final, "use_sim_time": True}],
+        parameters=[
+            {"robot_description": robot_description_param, "use_sim_time": True}
+        ],
     )
-
     # ------------------------------------------------------
     # Preparação do sistema de controle das rodas do robô
     # ------------------------------------------------------

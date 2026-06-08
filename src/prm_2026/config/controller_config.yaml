@@ -15,6 +15,7 @@ gripper_controller:
   ros__parameters:
     joints:
       - gripper_extension
+      - arm_elbow
       - right_gripper_joint
       - left_gripper_joint
 
