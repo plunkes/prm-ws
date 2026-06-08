@@ -45,7 +45,11 @@ class DStarLitePersonalizado:
         )
 
     def obter_vizinhos(self, u):
-        """Retorna os vizinhos válidos (não obstáculos) de uma célula."""
+        """
+        Retorna os vizinhos válidos (não obstáculos) de uma célula.
+        Aplica margem de segurança MÍNIMA: permite se mover próximo a obstáculos,
+        mas não AT THE OBSTACLE.
+        """
         vizinhos = []
         movimentos = [
             (0, 1),
@@ -61,9 +65,10 @@ class DStarLitePersonalizado:
 
         for dx, dy in movimentos:
             nx, ny = u[0] + dx, u[1] + dy
-            # Se está dentro do mapa e não é obstáculo fatal (ex: > 50 é parede)
+            # Se está dentro do mapa e não é obstáculo fatal (ex: >= 50 é parede)
+            # Permite células desconhecidas (-1) pois são alvos de exploração
             if 0 <= nx < largura and 0 <= ny < altura:
-                if self.mapa[ny, nx] < 50 and self.mapa[ny, nx] != -1:
+                if self.mapa[ny, nx] < 50:  # Permite -1 (desconhecido) e 0-49 (livre)
                     vizinhos.append((nx, ny))
         return vizinhos
 
@@ -127,9 +132,19 @@ class DStarLitePersonalizado:
             if not vizinhos:
                 return []  # Sem saída!
 
+            # Filtra vizinhos que têm custo calculado (g != inf)
+            vizinhos_validos = [
+                v for v in vizinhos 
+                if self.g.get(v, float("inf")) != float("inf")
+            ]
+            
+            if not vizinhos_validos:
+                # Se nenhum vizinho tem custo calculado, escolher o de menor rhs
+                vizinhos_validos = vizinhos
+
             # Escolhe o vizinho que tem o menor (custo_movimento + g)
             melhor_vizinho = min(
-                vizinhos,
+                vizinhos_validos,
                 key=lambda viz: (
                     self.custo_movimento(atual, viz) + self.g.get(viz, float("inf"))
                 ),

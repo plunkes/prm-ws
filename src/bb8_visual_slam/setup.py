@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 import os
 from glob import glob
 
-package_name = "bb8_control"
+package_name = "bb8_visual_slam"
 
 setup(
     name=package_name,
@@ -15,22 +15,13 @@ setup(
             os.path.join("share", package_name, "launch"),
             glob(os.path.join("launch", "*launch.[pxy][yma]*")),
         ),
-        (
-            os.path.join("share", package_name, "config"),
-            glob(os.path.join("config", "*.yaml")),
-        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="banoffee",
     maintainer_email="pedrolunkesvillela@usp.br",
-    description="Autonomous exploration and flag capture – FSM + Nav2 integration",
+    description="Optional visual SLAM (RTAB-Map) for the BB8 robot",
     license="Apache-2.0",
     extras_require={"test": ["pytest"]},
-    entry_points={
-        "console_scripts": [
-            "controle_robo = bb8_control.controle_robo:main",
-            "vision_processor = bb8_control.vision_processor:main",
-        ],
-    },
+    entry_points={"console_scripts": []},
 )

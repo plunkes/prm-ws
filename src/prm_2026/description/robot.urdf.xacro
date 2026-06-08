@@ -69,7 +69,7 @@
       </geometry>
     </collision>
 
-    <xacro:box_inertia m="0.2" w="${base_width}" d="${base_length}" h="${base_height}"/>
+    <xacro:box_inertia m="4.0" w="${base_width}" d="${base_length}" h="${base_height}"/>
   </link>
 
   <!-- Definindo a Base do Robô (base footprint) -->
@@ -104,7 +104,7 @@
         </geometry>
       </collision>
 
-      <xacro:cylinder_inertia m="0.2" r="${wheel_radius}" h="${wheel_width}"/>
+      <xacro:cylinder_inertia m="0.05" r="${wheel_radius}" h="${wheel_width}"/>
     </link>
 
     <joint name="${prefix}_joint" type="continuous">
@@ -118,6 +118,20 @@
 
   <xacro:wheel prefix="drivewhl_l" x_reflect="-1" y_reflect="1" />
   <xacro:wheel prefix="drivewhl_r" x_reflect="-1" y_reflect="-1" />
+
+  <!-- High friction on drive wheels (prevents slip) -->
+  <gazebo reference="drivewhl_l_link">
+    <mu1>100.0</mu1>
+    <mu2>50.0</mu2>
+    <kp>1e6</kp>
+    <kd>1.0</kd>
+  </gazebo>
+  <gazebo reference="drivewhl_r_link">
+    <mu1>100.0</mu1>
+    <mu2>50.0</mu2>
+    <kp>1e6</kp>
+    <kd>1.0</kd>
+  </gazebo>
 
   <link name="front_caster">
     <visual>
@@ -144,6 +158,14 @@
     <child link="front_caster"/>
     <origin xyz="${caster_xoff} 0.0 ${-(base_height/2)}" rpy="0 0 0"/>
   </joint>
+
+  <!-- Very low friction on caster so it rotates freely -->
+  <gazebo reference="front_caster">
+    <mu1>0.01</mu1>
+    <mu2>0.01</mu2>
+    <kp>100000.0</kp>
+    <kd>1.0</kd>
+  </gazebo>
 
   <!-- Definindo a IMU do Robô (física) -->
   <link name="imu_link">
@@ -248,13 +270,13 @@
 
     <!-- Definição do primeiro atuador, correspondente à roda esquerda ("drive wheel left") -->
     <joint name="drivewhl_l_joint">
-      
+
       <!-- Interface de comando de velocidade angular (por exemplo, rad/s) para essa junta -->
       <command_interface name="velocity">
         <!-- Valor mínimo permitido para o comando de velocidade (limite inferior) -->
-        <param name="min">-1</param>
+        <param name="min">-10</param>
         <!-- Valor máximo permitido para o comando de velocidade (limite superior) -->
-        <param name="max">1</param>
+        <param name="max">10</param>
       </command_interface>
 
       <!-- Interface de estado que fornece a posição atual da junta (por exemplo, em radianos) -->
@@ -265,13 +287,13 @@
 
     <!-- Definição do segundo atuador, correspondente à roda direita ("drive wheel right") -->
     <joint name="drivewhl_r_joint">
-      
+
       <!-- Interface de comando de velocidade angular para essa junta -->
       <command_interface name="velocity">
         <!-- Limite inferior da velocidade que pode ser comandada -->
-        <param name="min">-1</param>
+        <param name="min">-10</param>
         <!-- Limite superior da velocidade que pode ser comandada -->
-        <param name="max">1</param>
+        <param name="max">10</param>
       </command_interface>
 
       <!-- Interface de estado para leitura da posição da junta -->
@@ -440,6 +462,25 @@
       <enable_metrics>true</enable_metrics>
     </sensor> -->
 
+    <!-- RGB camera – used by bb8_visual_slam package (rtabmap loop closure) -->
+    <sensor name="robot_cam_rgb" type="camera">
+      <topic>robot_cam_rgb</topic>
+      <camera>
+        <horizontal_fov>1.57</horizontal_fov>
+        <image>
+          <width>320</width>
+          <height>240</height>
+        </image>
+        <clip>
+          <near>0.1</near>
+          <far>100</far>
+        </clip>
+      </camera>
+      <always_on>1</always_on>
+      <update_rate>10</update_rate>
+      <visualize>false</visualize>
+    </sensor>
+
     <!-- Insere uma camera com segmentacao semantica -->
     <sensor name="robot_cam" type="segmentation">
       <topic>robot_cam</topic>
@@ -533,7 +574,7 @@
 
   <joint name="gripper_extension" type="revolute">
 
-    <axis xyz="0 1 0"/>
+    <axis xyz="0 0 1"/>
     <limit effort="50.0" lower="-1.57075" upper="0.2" velocity="0.5"/>
     <origin rpy="0 0 0" xyz="0.2 0 0.05"/>
 
