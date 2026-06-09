@@ -12,7 +12,7 @@ States:
 Recovery (inside EXPLORANDO):
   If the robot does not move >= WATCHDOG_DIST for WATCHDOG_TIMEOUT_S the FSM:
     1. Cancels the active Nav2 goal.
-    2. Clears both Nav2 costmaps (removes phantom obstacles).
+    2. Clears the local costmap (removes phantom obstacles).
     3. Backs up for BACKUP_TICKS * 0.2 s.
     4. Spins for RECOVERY_SPIN_S seconds.
     5. Re-activates explore_lite.
@@ -28,8 +28,6 @@ import rclpy.executors
 import rclpy.time
 import tf2_ros
 from geometry_msgs.msg import Pose2D, Twist
-from lifecycle_msgs.msg import Transition
-from lifecycle_msgs.srv import ChangeState
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.srv import ClearEntireCostmap
 from nav_msgs.msg import OccupancyGrid
@@ -43,7 +41,7 @@ from rclpy.qos import (
     ReliabilityPolicy,
 )
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import Float32, Float64MultiArray, String
+from std_msgs.msg import Bool, Float32, Float64MultiArray, String
 
 
 class ControleRoboFSM(Node):
@@ -52,7 +50,7 @@ class ControleRoboFSM(Node):
     # ── Flag-approach parameters ──────────────────────────────────────────────
     COLETA_DISTANCE = 0.45      # m  — LIDAR front threshold → POSICIONANDO
     RESEND_TICKS = 20           # FSM ticks between Nav2 goal refreshes (~4 s)
-    ROTATE_SPEED = 1.5          # rad/s for PROCURANDO and POSICIONANDO
+    ROTATE_SPEED = 3.0          # rad/s for PROCURANDO and POSICIONANDO
     ALIGN_THRESHOLD = math.radians(5)
     SEARCH_TICKS_360 = 30       # ticks (~6 s) for a full 360° search
     FLAG_CONFIRM_FRAMES = 3     # consecutive detections before trusting the flag
@@ -60,10 +58,12 @@ class ControleRoboFSM(Node):
     # ── Frontier-exhaustion watchdog ──────────────────────────────────────────
     WATCHDOG_DIST = 0.20        # m  — minimum movement to reset the idle timer
     WATCHDOG_TIMEOUT_S = 12.0   # s  — idle time before recovery starts
-    BACKUP_SPEED = -0.15        # m/s (negative = reverse)
+    BACKUP_SPEED = -0.30        # m/s (negative = reverse)
     BACKUP_TICKS = 8            # 8 × 0.2 s = 1.6 s backward
     RECOVERY_SPIN_S = 6.0       # s  — spin duration after backup
     HARD_RECOVERY_COUNT = 3     # recovery cycles before clearing global costmap
+    RECOVERY_ROTATE_SPEED = 1.0  # rad/s for recovery spins
+    EXPLORE_HEARTBEAT_TICKS = 25  # ticks between keepalive resumes (~5 s at 5 Hz)
 
     def __init__(self):
         """Initialise publishers, subscribers, service clients, and timers."""
@@ -104,7 +104,6 @@ class ControleRoboFSM(Node):
             Float32, "/vision/flag_bearing", self._cb_vision_bearing, 10,
             callback_group=self._cb_subs,
         )
-
         # ── Publishers ────────────────────────────────────────────────────────
         self._cmd_pub = self.create_publisher(
             Twist, "/diff_drive_base_controller/cmd_vel_unstamped", 10
@@ -120,11 +119,10 @@ class ControleRoboFSM(Node):
             callback_group=self._cb_timer,
         )
 
-        # ── explore_lite lifecycle service ────────────────────────────────────
-        self._explore_lc = self.create_client(
-            ChangeState, "/explore_node/change_state",
-            callback_group=self._cb_subs,
-        )
+        # ── explore_lite control (Bool topic: False=stop, True=resume) ──────────
+        # m-explore-ros2 is a plain rclcpp::Node; exploration is paused/resumed
+        # by publishing std_msgs/Bool to explore/resume (not lifecycle transitions).
+        self._explore_resume_pub = self.create_publisher(Bool, "/explore/resume", 10)
 
         # ── Costmap clear services (called during recovery) ───────────────────
         self._local_costmap_clear = self.create_client(
@@ -166,6 +164,7 @@ class ControleRoboFSM(Node):
         self._recovery_spinning = False
         self._recovery_ticks = 0
         self._recovery_count = 0    # cycles since last map progress
+        self._explore_heartbeat_ticks = 0
 
         # ── FSM ───────────────────────────────────────────────────────────────
         self._estado = "EXPLORANDO"
@@ -246,14 +245,6 @@ class ControleRoboFSM(Node):
         else:
             self.get_logger().info("[DIAG] Nav2 action server OK")
 
-        if not self._explore_lc.service_is_ready():
-            self.get_logger().warn(
-                "[DIAG] /explore_node/change_state not available – "
-                "explore_lite may still be starting up."
-            )
-        else:
-            self.get_logger().info("[DIAG] explore_lite lifecycle service OK")
-
         if ok:
             self.get_logger().info("[DIAG] All primary systems GO")
 
@@ -332,32 +323,26 @@ class ControleRoboFSM(Node):
         return rx + dist * math.cos(world_angle), ry + dist * math.sin(world_angle)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # EXPLORE_LITE LIFECYCLE
+    # EXPLORE_LITE CONTROL
     # ─────────────────────────────────────────────────────────────────────────
 
     def _deactivate_explore(self):
-        """Send ACTIVE → INACTIVE transition to explore_lite (async)."""
-        if not self._explore_lc.service_is_ready():
-            self.get_logger().warn(
-                "[EXPLORE] Lifecycle service not ready; cannot deactivate."
-            )
-            return
-        req = ChangeState.Request()
-        req.transition.id = Transition.TRANSITION_DEACTIVATE
-        self._explore_lc.call_async(req)
-        self.get_logger().info("[EXPLORE] Deactivate request sent to explore_lite")
+        """Stop explore_lite: publishes False to /explore/resume.
+
+        The explore node calls stop() which cancels any active Nav2 goal and
+        halts its planning timer.
+        """
+        self._explore_resume_pub.publish(Bool(data=False))
+        self.get_logger().info("[EXPLORE] Stop sent to explore_lite")
 
     def _activate_explore(self):
-        """Send INACTIVE → ACTIVE transition to explore_lite (async)."""
-        if not self._explore_lc.service_is_ready():
-            self.get_logger().warn(
-                "[EXPLORE] Lifecycle service not ready; cannot activate."
-            )
-            return
-        req = ChangeState.Request()
-        req.transition.id = Transition.TRANSITION_ACTIVATE
-        self._explore_lc.call_async(req)
-        self.get_logger().info("[EXPLORE] Activate request sent to explore_lite")
+        """Resume explore_lite: publishes True to /explore/resume.
+
+        The explore node calls resume() which restarts its planning timer and
+        picks the next frontier.
+        """
+        self._explore_resume_pub.publish(Bool(data=True))
+        self.get_logger().info("[EXPLORE] Resume sent to explore_lite")
 
     # ─────────────────────────────────────────────────────────────────────────
     # COSTMAP CLEARING
@@ -455,6 +440,7 @@ class ControleRoboFSM(Node):
             self._activate_explore()
             self._watchdog_pos = None
             self._watchdog_idle_s = 0.0
+            self._explore_heartbeat_ticks = 0
 
     def _fsm_tick(self):
         """Run one FSM tick: evaluate transitions then execute the current state action."""
@@ -551,7 +537,7 @@ class ControleRoboFSM(Node):
         # ── Phase 3: spinning ─────────────────────────────────────────────────
         if self._recovery_spinning:
             twist = Twist()
-            twist.angular.z = self.ROTATE_SPEED
+            twist.angular.z = self.RECOVERY_ROTATE_SPEED
             self._cmd_pub.publish(twist)
             self._recovery_ticks -= 1
             if self._recovery_ticks <= 0:
@@ -560,6 +546,7 @@ class ControleRoboFSM(Node):
                 self._activate_explore()
                 self._watchdog_pos = None
                 self._watchdog_idle_s = 0.0
+                self._explore_heartbeat_ticks = 0
                 self.get_logger().info(
                     "[EXPLORE] Recovery complete – explore_lite reactivated"
                 )
@@ -588,11 +575,17 @@ class ControleRoboFSM(Node):
                 self._recovery_count += 1
                 if self._recovery_count >= self.HARD_RECOVERY_COUNT:
                     self._clear_global_costmap()
-                    self._recovery_count = 0
 
                 self._recovery_backing = True
                 self._recovery_back_ticks = self.BACKUP_TICKS
                 self._watchdog_idle_s = 0.0
+                return
+
+        # ── Heartbeat: keepalive resume so explore_lite stays active ─────────
+        self._explore_heartbeat_ticks += 1
+        if self._explore_heartbeat_ticks >= self.EXPLORE_HEARTBEAT_TICKS:
+            self._explore_heartbeat_ticks = 0
+            self._explore_resume_pub.publish(Bool(data=True))
 
     def _do_navegando(self, rx: float, ry: float):
         """Send / refresh a Nav2 goal toward a stopping point in front of the flag."""

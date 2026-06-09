@@ -56,8 +56,8 @@ ros2 launch bb8_control main_exploration.launch.py world:=arena_paredes.sdf
 │                         EXPLORANDO                              │
 │  explore_lite ACTIVE → sends NavigateToPose goals to Nav2       │
 │  Watchdog: if no movement ≥ 0.20 m for 12 s →                   │
-│    1. Deactivate explore_lite                                    │
-│    2. Spin 6 s (recovery)   ──── back to explore_lite ACTIVE ───┤
+│    1. Deactivate explore_lite + clear local costmap              │
+│    2. Back up 1.6 s, then spin 6 s  ─── back to explore ACTIVE ─┤
 │                                                                  │
 │  Flag detected by /vision/flag_detection? ─────────────────────►│
 └──────────────────────────────────┬──────────────────────────────┘
@@ -98,8 +98,13 @@ ros2 launch bb8_control main_exploration.launch.py world:=arena_paredes.sdf
 |---|---|---|
 | `COLETA_DISTANCE` | 0.45 m | LIDAR front distance that triggers POSICIONANDO |
 | `WATCHDOG_DIST` | 0.20 m | Minimum movement to reset the idle timer |
-| `WATCHDOG_TIMEOUT_S` | 12.0 s | Idle time before recovery spin |
-| `RECOVERY_SPIN_S` | 6.0 s | Recovery spin duration |
+| `WATCHDOG_TIMEOUT_S` | 12.0 s | Idle time before recovery starts |
+| `BACKUP_SPEED` | -0.15 m/s | Reverse speed during recovery phase 1 |
+| `BACKUP_TICKS` | 8 | Backup duration (8 × 0.2 s = 1.6 s) |
+| `RECOVERY_SPIN_S` | 6.0 s | Spin duration after backup (phase 2) |
+| `HARD_RECOVERY_COUNT` | 3 | Cycles before also clearing global costmap |
+| `FLAG_CONFIRM_FRAMES` | 3 | Consecutive detections before trusting the flag |
+| `EXPLORE_HEARTBEAT_TICKS` | 25 | Ticks between explore_lite keepalive (~5 s) |
 | `RESEND_TICKS` | 20 | FSM ticks between Nav2 goal refreshes |
 | `ROTATE_SPEED` | 1.5 rad/s | Spin rate for PROCURANDO and POSICIONANDO |
 | `SEARCH_TICKS_360` | 30 ticks | ~6 s for full 360° search in PROCURANDO |
@@ -116,19 +121,12 @@ own deactivate + spin recovery. The two recovery mechanisms overlap, which can
 cause erratic motion. The `progress_timeout` in `explore.yaml` is set to 15 s
 and is effectively never reached because the FSM watchdog always preempts it.
 
-**2. Race condition between async deactivation and recovery spin**
-`_deactivate_explore()` sends an async lifecycle service call. Before the
-service response arrives (≈100 ms), the FSM immediately starts publishing spin
-velocity on `/diff_drive_base_controller/cmd_vel_unstamped`. If explore_lite's
-Nav2 goal is still active during this window, Nav2 also publishes to
-`/cmd_vel` → relay → same topic. Last writer wins, causing brief chaotic motion.
-
-**3. Nav2 may not reach within `COLETA_DISTANCE` of the flag**
-The Nav2 goal is offset 0.65 m from the estimated flag position. Nav2's
-`xy_goal_tolerance` is 0.25 m, so it considers the goal "reached" when within
-0.25 m of the offset point (≈0.90 m from flag). The LIDAR transition to
+**2. Nav2 may not reach within `COLETA_DISTANCE` of the flag**
+The Nav2 goal is offset 0.55 m from the estimated flag position. Nav2's
+`xy_goal_tolerance` is 0.15 m, so it considers the goal "reached" when within
+0.15 m of the offset point (≈0.70 m from flag). The LIDAR transition to
 POSICIONANDO requires `front_dist ≤ 0.45 m`. If Nav2 stops the robot at
-0.90 m and the flag is not in the front ±30° LIDAR cone, the robot can get
+0.70 m and the flag is not in the front ±30° LIDAR cone, the robot can get
 stuck resending the same Nav2 goal indefinitely without triggering POSICIONANDO.
 
 **4. Flag position drifts while approaching**
@@ -142,9 +140,9 @@ When the FSM publishes velocity directly (PROCURANDO, POSICIONANDO, recovery
 spin), it does not check `_front_dist`. The robot can spin into nearby walls
 at 1.5 rad/s with no avoidance.
 
-**6. Single-frame flag detection (no hysteresis)**
-One camera frame with the flag label immediately triggers `BANDEIRA_DETECTADA`.
-A single false-positive pixel in the semantic segmentation abandons exploration.
+**6. Flag position drifts while approaching (continued)**
+If the flag goes out of camera view during the final approach (e.g., robot turns
+slightly), the FSM falls back to PROCURANDO_BANDEIRA and spins to reacquire.
 
 ---
 
@@ -177,14 +175,21 @@ ros2 lifecycle get /bt_navigator
 
 ### `explore.launch.py` — explore_lite only
 
-Starts `explore_node` (lifecycle) + `lifecycle_manager_explore` (autostart).
-Requires Nav2's global costmap to be publishing.
+Starts `explore_node` (plain ROS 2 node from m-explore-ros2).
+The node blocks until Nav2's `navigate_to_pose` action server is ready, then
+begins frontier planning automatically.
+
+Exploration is paused/resumed via topic:
+```bash
+ros2 topic pub --once /explore/resume std_msgs/msg/Bool "data: false"  # stop
+ros2 topic pub --once /explore/resume std_msgs/msg/Bool "data: true"   # resume
+```
 
 ```bash
 ros2 launch bb8_control explore.launch.py
 # Watch frontier markers in RViz (/explore/frontiers)
-# Check lifecycle state:
-ros2 lifecycle get /explore_node
+# Check exploration status:
+ros2 topic echo /explore/status
 ```
 
 ### `perception.launch.py` — Vision processor only
@@ -294,15 +299,15 @@ ros2 topic echo /rosout | grep "\[FSM\]"
 ### Verify explore_lite is running
 
 ```bash
-ros2 lifecycle get /explore_node          # Expected: Active
-ros2 topic hz /explore/frontiers          # should publish ~0.33 Hz
+ros2 topic hz /explore/frontiers          # should publish at ~1 Hz
+ros2 topic echo /explore/status           # EXPLORATION_STARTED or EXPLORATION_COMPLETE
 ```
 
-### Force a lifecycle pause/resume manually
+### Force a pause/resume manually
 
 ```bash
-ros2 lifecycle set /explore_node deactivate
-ros2 lifecycle set /explore_node activate
+ros2 topic pub --once /explore/resume std_msgs/msg/Bool "data: false"  # pause
+ros2 topic pub --once /explore/resume std_msgs/msg/Bool "data: true"   # resume
 ```
 
 ### Inspect Nav2 goal traffic
@@ -338,7 +343,7 @@ ros2 bag record /map /scan /tf /tf_static \
 ... (robot explores for N minutes) ...
 [vision_processor]: Flag @ (320, 240)px  bearing=2.3°  area=480px
 [controle_robo]: [FSM] EXPLORANDO → BANDEIRA_DETECTADA
-[controle_robo]: [EXPLORE] Deactivate request sent to explore_lite
+[controle_robo]: [EXPLORE] Stop sent to explore_lite
 [controle_robo]: [FSM] BANDEIRA_DETECTADA → NAVIGANDO_PARA_BANDEIRA
 [controle_robo]: [Nav2] goal → (3.45, -1.20)
 [controle_robo]: [Nav2] goal SUCCEEDED
@@ -353,7 +358,7 @@ ros2 bag record /map /scan /tf /tf_static \
 **Robot doesn't move at all**
 
 - Check: `ros2 topic echo /map --once` (SLAM running?)
-- Check: `ros2 lifecycle get /explore_node` (should be `Active`)
+- Check: `ros2 topic echo /explore/status` (explore_lite running?)
 - Check: `ros2 topic echo /navigate_to_pose/_action/status` (Nav2 receiving goals?)
 
 **explore_lite logs "All frontiers traversed/tried out, stopping"**

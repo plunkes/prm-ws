@@ -22,9 +22,7 @@
   <exec_depend>topic_tools</exec_depend>
   <!-- Frontier exploration: sudo apt install ros-humble-explore-lite -->
   <exec_depend>explore_lite</exec_depend>
-  <!-- Lifecycle management for explore_lite pause/resume -->
-  <exec_depend>lifecycle_msgs</exec_depend>
-  <!-- Lifecycle manager to auto-activate explore_node on startup -->
+  <!-- nav2_lifecycle_manager is used by nav2.launch.py for the Nav2 stack -->
   <exec_depend>nav2_lifecycle_manager</exec_depend>
 
   <test_depend>ament_copyright</test_depend>

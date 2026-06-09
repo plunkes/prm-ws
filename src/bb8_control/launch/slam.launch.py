@@ -50,4 +50,16 @@ def generate_launch_description():
         ros_arguments=["--log-level", log_level],
     )
 
-    return LaunchDescription([declare_verbose, slam_node])
+    # Ground-truth odometry: converts /model/prm_robot/pose (Gazebo world-frame
+    # pose) into nav_msgs/Odometry on /odom and the odom→base_link TF.
+    # Replaces the diff_drive_controller's encoder-based odometry (which drifts).
+    odom_gt_node = Node(
+        package="bb8_control",
+        executable="odom_gt_publisher",
+        name="odom_gt_publisher",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+        ros_arguments=["--log-level", log_level],
+    )
+
+    return LaunchDescription([declare_verbose, slam_node, odom_gt_node])

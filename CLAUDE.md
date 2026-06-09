@@ -94,11 +94,11 @@ Gazebo simulation
   ├─ /odom (Odometry)
   └─ /map (OccupancyGrid, from SLAM Toolbox)
 
-explore_node (explore_lite, lifecycle)
+explore_node (explore_lite, plain rclcpp::Node from m-explore-ros2)
   └─ sends NavigateToPose goals to Nav2 during EXPLORANDO state
 
 controle_robo.py (ControleRoboFSM)
-  ├─ controls explore_node via /explore_node/change_state lifecycle service
+  ├─ pauses/resumes explore_node via /explore/resume (std_msgs/Bool)
   ├─ drives Nav2 ActionClient (NavigateToPose) for flag approach
   └─ publishes /diff_drive_base_controller/cmd_vel_unstamped
 
@@ -114,11 +114,11 @@ Nav2 stack (nav2.launch.py)
 - **PROCURANDO_BANDEIRA** – flag lost mid-nav; robot spins to reacquire. After 30 ticks (~6 s) with no flag, returns to EXPLORANDO.
 - **POSICIONANDO_PARA_COLETA** – proportional bearing alignment; stops when bearing < 5° and announces victory.
 
-### explore_lite lifecycle management
+### explore_lite control
 
-`explore_node` is a ROS 2 lifecycle node managed by `nav2_lifecycle_manager` (autostart). The FSM bypasses the manager and calls `/explore_node/change_state` directly:
-- `TRANSITION_DEACTIVATE` (id=4) — stops frontier goals, cancels in-flight Nav2 goals
-- `TRANSITION_ACTIVATE` (id=3) — resumes frontier search
+`explore_node` (from local `src/m-explore-ros2/`) is a **plain `rclcpp::Node`**, not a lifecycle node. The FSM pauses and resumes it by publishing `std_msgs/Bool` to `/explore/resume`:
+- `False` → `stop()` — cancels all Nav2 goals and halts the planning timer
+- `True` → `resume()` — restarts the planning timer and picks the next frontier
 
 ### Key files
 

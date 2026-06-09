@@ -1,19 +1,15 @@
 """
 explore_lite launch.
 
-Starts the explore_node lifecycle node and a dedicated lifecycle manager that
-auto-activates it. Once active, explore_node continuously sends NavigateToPose
-goals to Nav2 targeting the nearest unexplored frontier.
+Starts the explore_node (regular rclcpp::Node from m-explore-ros2).
+The node blocks in its constructor until Nav2's navigate_to_pose action
+server is ready, then begins frontier planning automatically.
 
-controle_robo.py intercepts exploration by calling:
-  /explore_node/change_state  (TRANSITION_DEACTIVATE = 4)
+Exploration is paused/resumed by publishing to /explore/resume (Bool):
+  False → stop()  – cancels active Nav2 goal, halts planning timer
+  True  → resume() – restarts planning timer
 
-and resumes it by calling:
-  /explore_node/change_state  (TRANSITION_ACTIVATE = 3)
-
-Prerequisites: Nav2 must be running so the global costmap is available.
-
-Install:  sudo apt install ros-humble-explore-lite
+controle_robo.py controls exploration via this topic.
 
 Usage:
   ros2 launch bb8_control explore.launch.py
@@ -27,11 +23,12 @@ from launch.substitutions import (
     PathJoinSubstitution,
     PythonExpression,
 )
-from launch_ros.actions import LifecycleNode, Node
+from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
+    """Generate the explore_lite launch description."""
     declare_verbose = DeclareLaunchArgument(
         "verbose",
         default_value="false",
@@ -43,7 +40,7 @@ def generate_launch_description():
 
     pkg_control = FindPackageShare("bb8_control")
 
-    explore_node = LifecycleNode(
+    explore_node = Node(
         package="explore_lite",
         executable="explore",
         name="explore_node",
@@ -56,26 +53,4 @@ def generate_launch_description():
         ros_arguments=["--log-level", log_level],
     )
 
-    # Manages explore_node lifecycle: configure → activate on startup.
-    # The controle_robo FSM calls change_state directly to deactivate/reactivate
-    # without going through the manager, which is fine – the manager observes
-    # but does not interfere with direct state transitions.
-    lifecycle_manager_explore = Node(
-        package="nav2_lifecycle_manager",
-        executable="lifecycle_manager",
-        name="lifecycle_manager_explore",
-        output="screen",
-        parameters=[
-            {
-                "use_sim_time": True,
-                "autostart": True,
-                "node_names": ["explore_node"],
-                # Bond timeout: if explore_node crashes, restart it.
-                "bond_timeout": 4.0,
-                "attempt_respawn_reconnection": True,
-            }
-        ],
-        ros_arguments=["--log-level", log_level],
-    )
-
-    return LaunchDescription([declare_verbose, explore_node, lifecycle_manager_explore])
+    return LaunchDescription([declare_verbose, explore_node])

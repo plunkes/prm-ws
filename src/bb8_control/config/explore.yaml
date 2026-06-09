@@ -5,21 +5,36 @@ explore_node:
     costmap_updates_topic: /global_costmap/costmap_updates
     visualize: true
 
-    # 1.0 Hz: replan frontiers every second so new map areas are picked up quickly.
-    planner_frequency: 1.0
+    # 0.5 Hz: re-evaluate frontiers every 2 s. At 0.5 m/s the robot travels ~1 m
+    # between evaluations — enough progress to commit to a direction. Faster
+    # replanning caused oscillation: each scan update revealed new equidistant
+    # frontiers, making explore_lite switch goals every second.
+    planner_frequency: 0.5
 
-    # 25 s: longer than the FSM watchdog cycle (12 s idle + 1.6 s backup + 6 s spin)
-    # so explore_lite never times out mid-recovery.
-    progress_timeout: 25.0
+    # 30 s: longer than the FSM watchdog cycle so explore_lite never times out
+    # mid-recovery.
+    progress_timeout: 30.0
 
-    # Lower potential_scale + higher gain_scale: prefer large open-area frontiers
-    # over nearby wall-adjacent ones. This steers the robot toward gaps between
-    # obstacles rather than straight at walls.
-    potential_scale: 2.0
-    gain_scale: 2.0
+    # High potential_scale: strongly prefer the nearest frontier. As the robot
+    # moves toward a frontier it gets closer (cost drops), creating a natural
+    # hysteresis that keeps the robot committed to the current direction.
+    # Low gain_scale: frontier size differences are small in open space and
+    # were causing constant switches between equally-sized frontiers.
+    potential_scale: 3.0
+    gain_scale: 1.0
     transform_tolerance: 0.3
 
-    min_frontier_size: 0.25
+    # 0.5 m: ignore small transient frontiers that flicker in and out as the
+    # LIDAR sweeps. These were triggering goal switches without representing
+    # real exploration targets.
+    min_frontier_size: 0.5
 
     return_to_init: false
     use_relative_frontiers: false
+
+    # Penalise frontiers that require a large rotation from the robot's current
+    # heading. Cost += orientation_scale * |heading_error_rad|. At 0.5 a full
+    # U-turn (π rad) costs the same as ~0.52 m of extra distance at the current
+    # potential_scale, so frontiers roughly ahead are always preferred over equal
+    # ones behind without completely blocking rear exploration.
+    orientation_scale: 0.5

@@ -32,6 +32,7 @@ setup(
             "controle_robo = bb8_control.controle_robo:main",
             "vision_processor = bb8_control.vision_processor:main",
             "diagnostics = bb8_control.diagnostics:main",
+            "odom_gt_publisher = bb8_control.odom_gt_publisher:main",
         ],
     },
 )

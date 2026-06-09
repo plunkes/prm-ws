@@ -47,7 +47,7 @@ STUCK_ERROR_S = 25.0            # seconds idle before ERROR
 ZERO_VEL_WARN_S = 8.0           # seconds of zero cmd_vel before WARN
 MAP_RATE_WARN_HZ = 0.3          # SLAM stall threshold
 SCAN_RATE_WARN_HZ = 2.0         # LIDAR bridge broken threshold
-ODOM_RATE_WARN_HZ = 5.0         # odometry bridge broken threshold
+ODOM_RATE_WARN_HZ = 1.5         # odometry bridge broken threshold (relay ~2 Hz)
 UNKNOWN_CELL_WARN_PCT = 80.0    # % unknown after 60 s → barely explored
 REPORT_INTERVAL_S = 10.0
 

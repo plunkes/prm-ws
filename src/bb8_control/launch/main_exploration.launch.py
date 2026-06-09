@@ -5,11 +5,15 @@ Brings up the complete autonomous stack in the correct boot order:
 
   1. Gazebo simulation  (prm_2026/inicia_simulacao)
   2. Robot spawn + controllers + RViz  (prm_2026/carrega_robo)
-  3. SLAM Toolbox  (bb8_control/slam.launch.py)
-  4. Nav2 navigation stack  (bb8_control/nav2.launch.py)
-  5. explore_lite + lifecycle manager  (bb8_control/explore.launch.py)
-  6. Vision / perception  (bb8_control/perception.launch.py)
-  7. Master FSM controller  (bb8_control/controle_robo)
+  3. SLAM Toolbox  (bb8_control/slam.launch.py)        — starts immediately
+  4. Perception  (bb8_control/perception.launch.py)    — t + 5 s
+  5. Nav2 navigation stack  (bb8_control/nav2.launch.py) — t + 10 s
+     (SLAM needs ~8-10 s to receive the first LIDAR scan and publish a valid
+     map; if Nav2 starts earlier its global costmap defaults to a tiny 5 m²
+     area centred at the world origin, placing the robot outside it)
+  6. explore_lite + FSM controller  (bb8_control/explore_control.launch.py)
+                                                       — t + 16 s
+     (Nav2 lifecycle activation takes ~3-5 s after Nav2 starts)
 
 Usage:
   ros2 launch bb8_control main_exploration.launch.py
@@ -18,7 +22,11 @@ Usage:
 """
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    TimerAction,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
@@ -59,7 +67,7 @@ def generate_launch_description():
         ),
     )
 
-    # ── 3. SLAM ────────────────────────────────────────────────────────────────
+    # ── 3. SLAM (t = 0) ───────────────────────────────────────────────────────
     slam = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([pkg_control, "launch", "slam.launch.py"])
@@ -67,38 +75,53 @@ def generate_launch_description():
         launch_arguments={"verbose": verbose}.items(),
     )
 
-    # ── 4. Nav2 ────────────────────────────────────────────────────────────────
-    nav2 = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([pkg_control, "launch", "nav2.launch.py"])
-        ),
-        launch_arguments={"verbose": verbose}.items(),
+    # ── 4. Perception (t = 5 s) ───────────────────────────────────────────────
+    perception = TimerAction(
+        period=5.0,
+        actions=[IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                PathJoinSubstitution([pkg_control, "launch", "perception.launch.py"])
+            ),
+            launch_arguments={"verbose": verbose}.items(),
+        )],
     )
 
-    # ── 5. explore_lite (starts exploring once Nav2 costmap is ready) ─────────
-    explore = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([pkg_control, "launch", "explore.launch.py"])
-        ),
-        launch_arguments={"verbose": verbose}.items(),
+    # ── 5. Nav2 (t = 8 s) ─────────────────────────────────────────────────────
+    # Global costmap uses rolling_window: the costmap is always pre-allocated
+    # and centred on the robot, so Nav2 can start as soon as odom_gt publishes
+    # the first TF (~6-8 s).  Malformed early SLAM maps are harmlessly skipped.
+    nav2 = TimerAction(
+        period=8.0,
+        actions=[IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                PathJoinSubstitution([pkg_control, "launch", "nav2.launch.py"])
+            ),
+            launch_arguments={"verbose": verbose}.items(),
+        )],
     )
 
-    # ── 6. Perception ──────────────────────────────────────────────────────────
-    perception = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([pkg_control, "launch", "perception.launch.py"])
-        ),
-        launch_arguments={"verbose": verbose}.items(),
+    # ── 6. explore_lite + FSM controller (t = 12 s) ───────────────────────────
+    # Nav2 lifecycle nodes take ~3-4 s to become active after Nav2 starts.
+    explore = TimerAction(
+        period=12.0,
+        actions=[IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                PathJoinSubstitution([pkg_control, "launch", "explore.launch.py"])
+            ),
+            launch_arguments={"verbose": verbose}.items(),
+        )],
     )
 
-    # ── 7. Master FSM controller ───────────────────────────────────────────────
-    controle_node = Node(
-        package="bb8_control",
-        executable="controle_robo",
-        name="controle_robo",
-        output="screen",
-        parameters=[{"use_sim_time": True}],
-        ros_arguments=["--log-level", log_level],
+    controle_node = TimerAction(
+        period=12.0,
+        actions=[Node(
+            package="bb8_control",
+            executable="controle_robo",
+            name="controle_robo",
+            output="screen",
+            parameters=[{"use_sim_time": True}],
+            ros_arguments=["--log-level", log_level],
+        )],
     )
 
     return LaunchDescription([
@@ -107,8 +130,8 @@ def generate_launch_description():
         sim,
         robot,
         slam,
+        perception,
         nav2,
         explore,
-        perception,
         controle_node,
     ])
