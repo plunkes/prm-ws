@@ -62,4 +62,15 @@ def generate_launch_description():
         ros_arguments=["--log-level", log_level],
     )
 
-    return LaunchDescription([declare_verbose, slam_node, odom_gt_node])
+    # Pads the SLAM /map to full-arena size so Nav2's global costmap is always
+    # large enough to plan across the unexplored parts of the arena.
+    map_padder_node = Node(
+        package="bb8_control",
+        executable="map_padder",
+        name="map_padder",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+        ros_arguments=["--log-level", log_level],
+    )
+
+    return LaunchDescription([declare_verbose, slam_node, odom_gt_node, map_padder_node])

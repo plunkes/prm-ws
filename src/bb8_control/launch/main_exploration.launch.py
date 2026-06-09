@@ -87,9 +87,10 @@ def generate_launch_description():
     )
 
     # ── 5. Nav2 (t = 8 s) ─────────────────────────────────────────────────────
-    # Global costmap uses rolling_window: the costmap is always pre-allocated
-    # and centred on the robot, so Nav2 can start as soon as odom_gt publishes
-    # the first TF (~6-8 s).  Malformed early SLAM maps are harmlessly skipped.
+    # Nav2 may briefly see malformed 0×0 SLAM maps during the startup race
+    # (odom_gt TF vs LIDAR scan ordering).  The FSM controller calls
+    # _clear_global_costmap() the moment a valid SLAM map arrives, which forces
+    # Nav2 to reinitialise from the real map.  No need to delay Nav2 further.
     nav2 = TimerAction(
         period=8.0,
         actions=[IncludeLaunchDescription(

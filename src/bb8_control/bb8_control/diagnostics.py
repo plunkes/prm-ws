@@ -228,10 +228,14 @@ class BB8Diagnostics(Node):
             self._flag_detections += 1
 
     def _cb_fsm_state(self, msg: String):
-        """Track current FSM state and count ticks per state."""
-        self._current_fsm_state = msg.data
-        self._fsm_state_counts[msg.data] = (
-            self._fsm_state_counts.get(msg.data, 0) + 1
+        """Log state transitions immediately; count time per state."""
+        new_state = msg.data
+        if new_state != self._current_fsm_state:
+            self.get_logger().info(f"[FSM] State → {new_state}")
+            self._current_fsm_state = new_state
+        # Count ticks for time-per-state in the periodic report
+        self._fsm_state_counts[new_state] = (
+            self._fsm_state_counts.get(new_state, 0) + 1
         )
 
     # ─────────────────────────────────────────────────────────────────────────

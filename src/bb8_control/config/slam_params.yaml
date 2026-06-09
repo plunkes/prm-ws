@@ -18,9 +18,16 @@ slam_toolbox:
     mode: mapping # running in online 2D mapping mode
 
     # Your Custom Tuned Parameters
-    minimum_travel_heading: 0.04
-    minimum_travel_distance: 0.10
-    map_update_interval: 2.0
+    # With the robot stationary at startup (Nav2/explore not yet running), SLAM
+    # must be able to add scans without requiring movement.  Setting both travel
+    # thresholds to 0 lets minimum_time_interval alone gate scan processing.
+    minimum_travel_distance: 0.0
+    minimum_travel_heading: 0.0
+    # One scan every 0.5 sim-seconds (= ~5 real seconds at 0.1× sim speed).
+    # Fast enough to build an initial map; slow enough to avoid redundant
+    # computations when the robot is stationary.
+    minimum_time_interval: 0.5
+    map_update_interval: 1.0
 
     # Slam Toolbox Scan Matching Tuners
     distance_variance_penalty: 0.5
@@ -31,7 +38,9 @@ slam_toolbox:
     loop_match_minimum_response_fine: 0.45
 
     # Core Dimensions
-    max_laser_range: 5.0
-    minimum_time_interval: 0.06
-    transform_timeout: 0.5
+    max_laser_range: 3.5
+    # 2.0 s real-time wait for each TF lookup.  On slow machines the odom_gt
+    # pose callback can lag the LIDAR scan callback; the longer timeout ensures
+    # SLAM picks up the first valid TF instead of dropping the scan.
+    transform_timeout: 2.0
     tf_buffer_duration: 30.0

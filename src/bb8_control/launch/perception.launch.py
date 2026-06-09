@@ -38,7 +38,7 @@ def generate_launch_description():
         output="screen",
         parameters=[{
             "use_sim_time":     True,
-            "flag_label_id":    1,
+            "flag_label_id":    25,   # label 25 = blue_flag (target); label 20 = red_flag (own team, ignore)
             "camera_hfov_deg":  90.0,
         }],
         ros_arguments=["--log-level", log_level],

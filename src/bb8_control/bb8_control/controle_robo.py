@@ -5,22 +5,19 @@ Master FSM control node — explore_lite edition.
 States:
   EXPLORANDO              – explore_lite drives Nav2 autonomously.
   BANDEIRA_DETECTADA      – flag confirmed (3 consecutive frames); explore_lite stopped.
-  NAVIGANDO_PARA_BANDEIRA – FSM drives Nav2 toward the flag.
-  PROCURANDO_BANDEIRA     – flag lost; robot spins to reacquire.
-  POSICIONANDO_PARA_COLETA– final bearing alignment; stop when centred.
+  NAVEGANDO_BANDEIRA      – FSM drives Nav2 toward the flag.
+  PROCURANDO_BANDEIRA     – flag lost; explore_lite reactivated to reacquire.
+  POSICIONANDO_PARA_COLETA– final bearing alignment; stops and extends arm when centred.
 
-Recovery (inside EXPLORANDO):
-  If the robot does not move >= WATCHDOG_DIST for WATCHDOG_TIMEOUT_S the FSM:
-    1. Cancels the active Nav2 goal.
-    2. Clears the local costmap (removes phantom obstacles).
-    3. Backs up for BACKUP_TICKS * 0.2 s.
-    4. Spins for RECOVERY_SPIN_S seconds.
-    5. Re-activates explore_lite.
-  After HARD_RECOVERY_COUNT cycles without progress the global costmap is also
-  force-cleared to dislodge persistent phantom obstacles.
+Global watchdog:
+  In any state except post-victory POSICIONANDO, if the robot has not moved
+  WATCHDOG_DIST metres for WATCHDOG_REAL_TIMEOUT wall-clock seconds the FSM
+  cancels the active Nav2 goal, clears the local costmap, and transitions to
+  EXPLORANDO.  The watchdog only activates after the first valid map arrives.
 """
 
 import math
+import time
 
 import numpy as np
 import rclpy
@@ -28,6 +25,7 @@ import rclpy.executors
 import rclpy.time
 import tf2_ros
 from geometry_msgs.msg import Pose2D, Twist
+from visualization_msgs.msg import Marker
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.srv import ClearEntireCostmap
 from nav_msgs.msg import OccupancyGrid
@@ -48,22 +46,22 @@ class ControleRoboFSM(Node):
     """FSM-based autonomous controller: exploration, flag detection, approach."""
 
     # ── Flag-approach parameters ──────────────────────────────────────────────
-    COLETA_DISTANCE = 0.45      # m  — LIDAR front threshold → POSICIONANDO
+    FLAG_STOP_DISTANCE = 1.0    # m  — Euclidean distance to flag → stop + victory
     RESEND_TICKS = 20           # FSM ticks between Nav2 goal refreshes (~4 s)
-    ROTATE_SPEED = 3.0          # rad/s for PROCURANDO and POSICIONANDO
-    ALIGN_THRESHOLD = math.radians(5)
-    SEARCH_TICKS_360 = 30       # ticks (~6 s) for a full 360° search
+    SEARCH_TICKS_360 = 30       # ticks before abandoning PROCURANDO (~6 sim-s)
     FLAG_CONFIRM_FRAMES = 3     # consecutive detections before trusting the flag
 
-    # ── Frontier-exhaustion watchdog ──────────────────────────────────────────
-    WATCHDOG_DIST = 0.20        # m  — minimum movement to reset the idle timer
-    WATCHDOG_TIMEOUT_S = 12.0   # s  — idle time before recovery starts
-    BACKUP_SPEED = -0.30        # m/s (negative = reverse)
-    BACKUP_TICKS = 8            # 8 × 0.2 s = 1.6 s backward
-    RECOVERY_SPIN_S = 6.0       # s  — spin duration after backup
-    HARD_RECOVERY_COUNT = 3     # recovery cycles before clearing global costmap
-    RECOVERY_ROTATE_SPEED = 1.0  # rad/s for recovery spins
-    EXPLORE_HEARTBEAT_TICKS = 25  # ticks between keepalive resumes (~5 s at 5 Hz)
+    # ── Global movement watchdog ──────────────────────────────────────────────
+    WATCHDOG_DIST = 0.20           # m  — minimum movement to reset the idle timer
+    WATCHDOG_REAL_TIMEOUT = 20.0   # wall-clock seconds of no movement → EXPLORANDO
+
+    # ── Heartbeat ─────────────────────────────────────────────────────────────
+    EXPLORE_HEARTBEAT_TICKS = 25   # ticks between keepalive resumes (~5 s at 5 Hz)
+
+    # ── Arm poses ─────────────────────────────────────────────────────────────
+    # joint order: [gripper_extension, arm_elbow, right_gripper_joint, left_gripper_joint]
+    ARM_RETRACT = [-1.5708, -1.5708, 0.0, 0.0]     # folded away from robot front
+    ARM_CAPTURE = [0.2, 0.5, -0.06, 0.06]           # extended forward, gripper open
 
     def __init__(self):
         """Initialise publishers, subscribers, service clients, and timers."""
@@ -104,6 +102,7 @@ class ControleRoboFSM(Node):
             Float32, "/vision/flag_bearing", self._cb_vision_bearing, 10,
             callback_group=self._cb_subs,
         )
+
         # ── Publishers ────────────────────────────────────────────────────────
         self._cmd_pub = self.create_publisher(
             Twist, "/diff_drive_base_controller/cmd_vel_unstamped", 10
@@ -112,6 +111,16 @@ class ControleRoboFSM(Node):
             Float64MultiArray, "/gripper_controller/commands", 10
         )
         self._state_pub = self.create_publisher(String, "/bb8/fsm_state", 10)
+        # Latched so RViz shows the marker as soon as it subscribes
+        self._flag_marker_pub = self.create_publisher(
+            Marker, "/flag_marker",
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                history=HistoryPolicy.KEEP_LAST,
+            ),
+        )
 
         # ── Nav2 action client ────────────────────────────────────────────────
         self._nav2 = ActionClient(
@@ -119,12 +128,12 @@ class ControleRoboFSM(Node):
             callback_group=self._cb_timer,
         )
 
-        # ── explore_lite control (Bool topic: False=stop, True=resume) ──────────
-        # m-explore-ros2 is a plain rclcpp::Node; exploration is paused/resumed
-        # by publishing std_msgs/Bool to explore/resume (not lifecycle transitions).
+        # ── explore_lite control (Bool: False=stop, True=resume) ──────────────
         self._explore_resume_pub = self.create_publisher(Bool, "/explore/resume", 10)
 
-        # ── Costmap clear services (called during recovery) ───────────────────
+        # ── Costmap clear services ─────────────────────────────────────────────
+        # Global costmap is cleared ONCE on the first successful TF lookup so
+        # Nav2 reinitialises from the real SLAM map instead of a stale 0×0 map.
         self._local_costmap_clear = self.create_client(
             ClearEntireCostmap,
             "/local_costmap/clear_entirely_local_costmap",
@@ -135,14 +144,16 @@ class ControleRoboFSM(Node):
             "/global_costmap/clear_entirely_global_costmap",
             callback_group=self._cb_subs,
         )
+        self._global_costmap_initialized = False
 
         # ── Sensor state ──────────────────────────────────────────────────────
         self._mapa: np.ndarray = None
         self._map_info = None
+        self._map_valid = False
         self._scan: LaserScan = None
         self._front_dist = float("inf")
         self._flag_detected = False
-        self._flag_consec = 0       # consecutive positive vision frames
+        self._flag_consec = 0
         self._flag_bearing = 0.0
         self._flag_map_x: float = None
         self._flag_map_y: float = None
@@ -153,17 +164,14 @@ class ControleRoboFSM(Node):
         self._nav2_last_xy = None
         self._nav2_ticks = 0
 
-        # ── Arm retraction ────────────────────────────────────────────────────
+        # ── Arm state ─────────────────────────────────────────────────────────
         self._arm_retract_sent = 0
 
-        # ── Recovery state ────────────────────────────────────────────────────
+        # ── Watchdog (wall-clock time) ─────────────────────────────────────────
         self._watchdog_pos: tuple = None
-        self._watchdog_idle_s = 0.0
-        self._recovery_backing = False
-        self._recovery_back_ticks = 0
-        self._recovery_spinning = False
-        self._recovery_ticks = 0
-        self._recovery_count = 0    # cycles since last map progress
+        self._watchdog_last_moved: float = None   # time.monotonic() timestamp
+
+        # ── Heartbeat ─────────────────────────────────────────────────────────
         self._explore_heartbeat_ticks = 0
 
         # ── FSM ───────────────────────────────────────────────────────────────
@@ -174,7 +182,7 @@ class ControleRoboFSM(Node):
         # ── Timers ────────────────────────────────────────────────────────────
         self.create_timer(0.2, self._fsm_tick, callback_group=self._cb_timer)
         self._diag_timer = self.create_timer(
-            8.0, self._startup_diagnostic, callback_group=self._cb_timer
+            30.0, self._startup_diagnostic, callback_group=self._cb_timer
         )
         self._arm_timer = self.create_timer(
             0.5, self._fold_arm, callback_group=self._cb_timer
@@ -183,27 +191,34 @@ class ControleRoboFSM(Node):
         self.get_logger().info(
             "ControleRoboFSM started – EXPLORANDO (explore_lite in control)"
         )
+        self._state_pub.publish(String(data=self._estado))
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ARM RETRACTION
+    # ARM CONTROL
     # ─────────────────────────────────────────────────────────────────────────
 
     def _fold_arm(self):
         """Send arm-retraction commands for the first few seconds after startup."""
         msg = Float64MultiArray()
-        msg.data = [-1.5708, -1.5708, 0.0, 0.0]
+        msg.data = self.ARM_RETRACT
         self._pub_gripper.publish(msg)
         self._arm_retract_sent += 1
         if self._arm_retract_sent >= 20:
             self._arm_timer.cancel()
             self.get_logger().info("[INIT] Arm retraction complete")
 
+    def _extend_arm_capture(self):
+        """Extend arm forward with gripper open — capture pose."""
+        msg = Float64MultiArray()
+        msg.data = self.ARM_CAPTURE
+        self._pub_gripper.publish(msg)
+
     # ─────────────────────────────────────────────────────────────────────────
     # STARTUP DIAGNOSTIC
     # ─────────────────────────────────────────────────────────────────────────
 
     def _startup_diagnostic(self):
-        """Log one-time health check 8 s after startup, then cancel itself."""
+        """Log one-time health check 30 s after startup, then cancel itself."""
         self._diag_timer.cancel()
         ok = True
 
@@ -254,15 +269,15 @@ class ControleRoboFSM(Node):
 
     def _cb_map(self, msg: OccupancyGrid):
         """Store the latest occupancy grid."""
-        first = self._mapa is None
         self._map_info = msg.info
         self._mapa = np.array(msg.data, dtype=np.int8).reshape(
             msg.info.height, msg.info.width
         )
-        if first:
+        if msg.info.width > 0 and msg.info.height > 0 and not self._map_valid:
+            self._map_valid = True
             self.get_logger().info(
-                f"[MAP] First map: {msg.info.width}×{msg.info.height} "
-                f"@ {msg.info.resolution:.3f} m/cell"
+                f"[MAP] First valid map: {msg.info.width}×{msg.info.height} "
+                f"@ {msg.info.resolution:.3f} m/cell — watchdog active"
             )
 
     def _cb_scan(self, msg: LaserScan):
@@ -277,7 +292,7 @@ class ControleRoboFSM(Node):
         self._front_dist = float(np.min(front)) if len(front) > 0 else msg.range_max
 
     def _cb_vision_pose(self, msg: Pose2D):
-        """Count consecutive positive detections; require FLAG_CONFIRM_FRAMES before flagging."""
+        """Count consecutive positive detections; require FLAG_CONFIRM_FRAMES."""
         if msg.theta > 0.5:
             self._flag_consec += 1
             self._flag_detected = self._flag_consec >= self.FLAG_CONFIRM_FRAMES
@@ -327,20 +342,10 @@ class ControleRoboFSM(Node):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _deactivate_explore(self):
-        """Stop explore_lite: publishes False to /explore/resume.
-
-        The explore node calls stop() which cancels any active Nav2 goal and
-        halts its planning timer.
-        """
         self._explore_resume_pub.publish(Bool(data=False))
         self.get_logger().info("[EXPLORE] Stop sent to explore_lite")
 
     def _activate_explore(self):
-        """Resume explore_lite: publishes True to /explore/resume.
-
-        The explore node calls resume() which restarts its planning timer and
-        picks the next frontier.
-        """
         self._explore_resume_pub.publish(Bool(data=True))
         self.get_logger().info("[EXPLORE] Resume sent to explore_lite")
 
@@ -353,12 +358,6 @@ class ControleRoboFSM(Node):
         if self._local_costmap_clear.service_is_ready():
             self._local_costmap_clear.call_async(ClearEntireCostmap.Request())
             self.get_logger().info("[RECOVERY] Local costmap cleared")
-
-    def _clear_global_costmap(self):
-        """Async request to clear the global costmap obstacle layer."""
-        if self._global_costmap_clear.service_is_ready():
-            self._global_costmap_clear.call_async(ClearEntireCostmap.Request())
-            self.get_logger().warn("[RECOVERY] Global costmap cleared (hard recovery)")
 
     # ─────────────────────────────────────────────────────────────────────────
     # NAV2 HELPERS
@@ -424,23 +423,24 @@ class ControleRoboFSM(Node):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _transition(self, new_state: str):
-        """Change FSM state and manage explore_lite lifecycle at boundaries."""
+        """Change FSM state, manage explore_lite lifecycle, publish for diagnostics."""
         if self._estado == new_state:
             return
         old = self._estado
         self._estado = new_state
         self.get_logger().info(f"[FSM] {old} → {new_state}")
+        self._state_pub.publish(String(data=new_state))
 
-        if old == "EXPLORANDO" and new_state != "EXPLORANDO":
-            self._recovery_backing = False
-            self._recovery_spinning = False
-            self._deactivate_explore()
+        # Reset watchdog on every transition so the 20 s window starts fresh.
+        self._watchdog_pos = None
+        self._watchdog_last_moved = None
 
-        elif new_state == "EXPLORANDO" and old != "EXPLORANDO":
+        # explore_lite is active during EXPLORANDO and PROCURANDO_BANDEIRA.
+        explore_states = ("EXPLORANDO", "PROCURANDO_BANDEIRA")
+        if new_state in explore_states:
             self._activate_explore()
-            self._watchdog_pos = None
-            self._watchdog_idle_s = 0.0
-            self._explore_heartbeat_ticks = 0
+        elif old in explore_states:
+            self._deactivate_explore()
 
     def _fsm_tick(self):
         """Run one FSM tick: evaluate transitions then execute the current state action."""
@@ -454,13 +454,58 @@ class ControleRoboFSM(Node):
 
         self._nav2_ticks += 1
 
-        self._state_pub.publish(String(data=self._estado))
+        # ── One-time global costmap clear on first TF availability ────────────
+        # Clears any stale 0×0 SLAM map state so Nav2 accepts the real map.
+        if not self._global_costmap_initialized:
+            if self._global_costmap_clear.service_is_ready():
+                self._global_costmap_initialized = True
+                self._global_costmap_clear.call_async(ClearEntireCostmap.Request())
+                self.get_logger().info(
+                    "[STARTUP] Global costmap cleared — map→base_link TF available"
+                )
+
+        # ── Global movement watchdog ──────────────────────────────────────────
+        # Any state except post-victory POSICIONANDO: no movement for
+        # WATCHDOG_REAL_TIMEOUT wall-clock seconds → cancel Nav2 + EXPLORANDO.
+        victory_hold = (
+            self._estado == "POSICIONANDO_PARA_COLETA" and self._victory_announced
+        )
+        if self._map_valid and not victory_hold:
+            if self._watchdog_pos is None:
+                self._watchdog_pos = (rx, ry)
+                self._watchdog_last_moved = time.monotonic()
+            else:
+                moved = math.hypot(
+                    rx - self._watchdog_pos[0], ry - self._watchdog_pos[1]
+                )
+                if moved >= self.WATCHDOG_DIST:
+                    self._watchdog_pos = (rx, ry)
+                    self._watchdog_last_moved = time.monotonic()
+                elif (
+                    time.monotonic() - self._watchdog_last_moved
+                    >= self.WATCHDOG_REAL_TIMEOUT
+                ):
+                    recovery = (
+                        "PROCURANDO_BANDEIRA"
+                        if self._estado == "POSICIONANDO_PARA_COLETA"
+                        else "EXPLORANDO"
+                    )
+                    self.get_logger().warn(
+                        f"[WATCHDOG] No movement for "
+                        f"{self.WATCHDOG_REAL_TIMEOUT:.0f} s "
+                        f"in state {self._estado} — going to {recovery}"
+                    )
+                    self._cancel_nav2()
+                    self._clear_local_costmap()
+                    self._transition(recovery)
+                    return
 
         if self._flag_detected:
             fx, fy = self._estimate_flag_map_pos(rx, ry, ryaw)
             if fx is not None:
                 self._flag_map_x = fx
                 self._flag_map_y = fy
+                self._publish_flag_marker()
 
         # ── State transitions ─────────────────────────────────────────────────
 
@@ -470,25 +515,29 @@ class ControleRoboFSM(Node):
 
         elif self._estado == "BANDEIRA_DETECTADA":
             if self._flag_map_x is not None:
-                self._transition("NAVIGANDO_PARA_BANDEIRA")
+                self._transition("NAVEGANDO_BANDEIRA")
             else:
                 self.get_logger().warn(
                     "[FSM] Flag seen but no position estimate – retrying"
                 )
                 self._transition("EXPLORANDO")
 
-        elif self._estado == "NAVIGANDO_PARA_BANDEIRA":
+        elif self._estado == "NAVEGANDO_BANDEIRA":
             if not self._flag_detected:
                 self._cancel_nav2()
                 self._procurando_ticks = 0
                 self._transition("PROCURANDO_BANDEIRA")
-            elif self._front_dist <= self.COLETA_DISTANCE:
-                self._cancel_nav2()
-                self._transition("POSICIONANDO_PARA_COLETA")
+            elif self._flag_map_x is not None:
+                dist_to_flag = math.hypot(
+                    rx - self._flag_map_x, ry - self._flag_map_y
+                )
+                if dist_to_flag < self.FLAG_STOP_DISTANCE:
+                    self._cancel_nav2()
+                    self._transition("POSICIONANDO_PARA_COLETA")
 
         elif self._estado == "PROCURANDO_BANDEIRA":
             if self._flag_detected:
-                self._transition("NAVIGANDO_PARA_BANDEIRA")
+                self._transition("NAVEGANDO_BANDEIRA")
             else:
                 self._procurando_ticks += 1
                 if self._procurando_ticks >= self.SEARCH_TICKS_360:
@@ -496,92 +545,28 @@ class ControleRoboFSM(Node):
                     self._transition("EXPLORANDO")
 
         elif self._estado == "POSICIONANDO_PARA_COLETA":
-            if not self._flag_detected:
-                self._procurando_ticks = 0
-                self._transition("PROCURANDO_BANDEIRA")
+            # Post-victory: never leave.  Pre-victory: Nav2 navigates to the
+            # stored flag position — no need to keep the flag in camera view.
+            # The watchdog handles genuine stuck cases → PROCURANDO_BANDEIRA.
+            pass
 
         # ── State actions ─────────────────────────────────────────────────────
 
         if self._estado == "EXPLORANDO":
-            self._do_explorando(rx, ry)
-        elif self._estado == "NAVIGANDO_PARA_BANDEIRA":
+            self._do_explorando()
+        elif self._estado == "NAVEGANDO_BANDEIRA":
             self._do_navegando(rx, ry)
         elif self._estado == "PROCURANDO_BANDEIRA":
             self._do_procurando()
         elif self._estado == "POSICIONANDO_PARA_COLETA":
-            self._do_posicionando()
+            self._do_posicionando(rx, ry)
 
     # ─────────────────────────────────────────────────────────────────────────
     # STATE ACTIONS
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _do_explorando(self, rx: float, ry: float):
-        """Run the watchdog and manage the 3-phase stuck recovery.
-
-        Phases: (1) cancel + clear costmaps, (2) back up, (3) spin.
-        explore_lite drives the robot between recovery cycles.
-        """
-        # ── Phase 2: backing up ───────────────────────────────────────────────
-        if self._recovery_backing:
-            twist = Twist()
-            twist.linear.x = self.BACKUP_SPEED
-            self._cmd_pub.publish(twist)
-            self._recovery_back_ticks -= 1
-            if self._recovery_back_ticks <= 0:
-                self._recovery_backing = False
-                self._recovery_spinning = True
-                self._recovery_ticks = int(self.RECOVERY_SPIN_S / 0.2)
-                self._cmd_pub.publish(Twist())
-            return
-
-        # ── Phase 3: spinning ─────────────────────────────────────────────────
-        if self._recovery_spinning:
-            twist = Twist()
-            twist.angular.z = self.RECOVERY_ROTATE_SPEED
-            self._cmd_pub.publish(twist)
-            self._recovery_ticks -= 1
-            if self._recovery_ticks <= 0:
-                self._recovery_spinning = False
-                self._cmd_pub.publish(Twist())
-                self._activate_explore()
-                self._watchdog_pos = None
-                self._watchdog_idle_s = 0.0
-                self._explore_heartbeat_ticks = 0
-                self.get_logger().info(
-                    "[EXPLORE] Recovery complete – explore_lite reactivated"
-                )
-            return
-
-        # ── Phase 1: watchdog ─────────────────────────────────────────────────
-        if self._watchdog_pos is None:
-            self._watchdog_pos = (rx, ry)
-            return
-
-        dist = math.hypot(rx - self._watchdog_pos[0], ry - self._watchdog_pos[1])
-        if dist >= self.WATCHDOG_DIST:
-            self._watchdog_pos = (rx, ry)
-            self._watchdog_idle_s = 0.0
-        else:
-            self._watchdog_idle_s += 0.2
-            if self._watchdog_idle_s >= self.WATCHDOG_TIMEOUT_S:
-                self.get_logger().warn(
-                    f"[EXPLORE] No movement for {self.WATCHDOG_TIMEOUT_S:.0f} s "
-                    "– starting recovery."
-                )
-                self._cancel_nav2()
-                self._deactivate_explore()
-                self._clear_local_costmap()
-
-                self._recovery_count += 1
-                if self._recovery_count >= self.HARD_RECOVERY_COUNT:
-                    self._clear_global_costmap()
-
-                self._recovery_backing = True
-                self._recovery_back_ticks = self.BACKUP_TICKS
-                self._watchdog_idle_s = 0.0
-                return
-
-        # ── Heartbeat: keepalive resume so explore_lite stays active ─────────
+    def _do_explorando(self):
+        """Send periodic explore_lite keepalive heartbeat."""
         self._explore_heartbeat_ticks += 1
         if self._explore_heartbeat_ticks >= self.EXPLORE_HEARTBEAT_TICKS:
             self._explore_heartbeat_ticks = 0
@@ -601,9 +586,7 @@ class ControleRoboFSM(Node):
             return
 
         face_yaw = math.atan2(dy, dx)
-        # Goal is placed slightly closer than COLETA_DISTANCE so Nav2 goal
-        # tolerance still lands within the LIDAR trigger range.
-        offset = self.COLETA_DISTANCE + 0.1
+        offset = self.FLAG_STOP_DISTANCE - 0.2   # aim 0.8 m from flag
         if dist > offset:
             gx = self._flag_map_x - (dx / dist) * offset
             gy = self._flag_map_y - (dy / dist) * offset
@@ -613,31 +596,67 @@ class ControleRoboFSM(Node):
         self._send_nav2_goal(gx, gy, yaw=face_yaw)
 
     def _do_procurando(self):
-        """Spin in place to reacquire the lost flag."""
-        twist = Twist()
-        twist.angular.z = self.ROTATE_SPEED
-        self._cmd_pub.publish(twist)
+        """Keep explore_lite alive while watching for the flag to reappear.
 
-    def _do_posicionando(self):
+        explore_lite is active in this state so the robot continues navigating;
+        no manual cmd_vel is published here.  After SEARCH_TICKS_360 ticks
+        without reacquiring the flag, the FSM transitions back to EXPLORANDO.
         """
-        Proportional bearing alignment toward the flag centre.
+        self._explore_heartbeat_ticks += 1
+        if self._explore_heartbeat_ticks >= self.EXPLORE_HEARTBEAT_TICKS:
+            self._explore_heartbeat_ticks = 0
+            self._explore_resume_pub.publish(Bool(data=True))
 
-        Stops and announces victory once the bearing is within ALIGN_THRESHOLD.
-        """
-        twist = Twist()
-        if abs(self._flag_bearing) > self.ALIGN_THRESHOLD:
-            twist.angular.z = self.ROTATE_SPEED * math.copysign(
-                1.0, self._flag_bearing
-            )
-        else:
-            if not self._victory_announced:
-                self._victory_announced = True
-                b = "=" * 60
-                self.get_logger().info(b)
-                self.get_logger().info("    VITORIA!  BANDEIRA CAPTURADA!")
-                self.get_logger().info("    BB8 completou a missao com sucesso!")
-                self.get_logger().info(b)
-        self._cmd_pub.publish(twist)
+    def _do_posicionando(self, rx: float, ry: float):
+        """Stop and extend arm: entered only when < FLAG_STOP_DISTANCE from flag."""
+        if self._victory_announced:
+            self._extend_arm_capture()
+            self._cmd_pub.publish(Twist())
+            return
+
+        # First tick in this state — robot is already within FLAG_STOP_DISTANCE.
+        self._cancel_nav2()
+        self._victory_announced = True
+        self._extend_arm_capture()
+        self._cmd_pub.publish(Twist())
+        self._announce_victory()
+
+    def _publish_flag_marker(self):
+        """Publish a blue cylinder in RViz at the estimated flag map position."""
+        m = Marker()
+        m.header.frame_id = "map"
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.ns = "flag"
+        m.id = 0
+        m.type = Marker.CYLINDER
+        m.action = Marker.ADD
+        m.pose.position.x = self._flag_map_x
+        m.pose.position.y = self._flag_map_y
+        m.pose.position.z = 0.5
+        m.pose.orientation.w = 1.0
+        m.scale.x = 0.30
+        m.scale.y = 0.30
+        m.scale.z = 1.0
+        m.color.r = 0.0
+        m.color.g = 0.4
+        m.color.b = 1.0
+        m.color.a = 0.9
+        # lifetime 0,0 = permanent (never expires)
+        self._flag_marker_pub.publish(m)
+
+    def _announce_victory(self):
+        sep  = "=" * 62
+        sep2 = "*" * 62
+        self.get_logger().info(sep2)
+        self.get_logger().info(sep)
+        self.get_logger().info("")
+        self.get_logger().info("        VITORIA!   BANDEIRA CAPTURADA!")
+        self.get_logger().info("        BB8 completou a missao com sucesso!")
+        self.get_logger().info("")
+        self.get_logger().info("        Braco estendido — aguardando coleta.")
+        self.get_logger().info("")
+        self.get_logger().info(sep)
+        self.get_logger().info(sep2)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -22,6 +22,8 @@ srv/_*.py
 *.pyc
 qtcreator-*
 *.user
+*.claude
+CLAUDE.MD
 
 *~
 

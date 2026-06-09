@@ -33,6 +33,7 @@ setup(
             "vision_processor = bb8_control.vision_processor:main",
             "diagnostics = bb8_control.diagnostics:main",
             "odom_gt_publisher = bb8_control.odom_gt_publisher:main",
+            "map_padder = bb8_control.map_padder:main",
         ],
     },
 )

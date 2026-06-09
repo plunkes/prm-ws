@@ -39,7 +39,7 @@ class VisionProcessorNode(Node):
     def __init__(self):
         super().__init__("vision_processor")
 
-        self.declare_parameter("flag_label_id", 1)
+        self.declare_parameter("flag_label_id", 25)  # label 25 = blue_flag (target)
         self.declare_parameter("camera_hfov_deg", 90.0)  # matches URDF horizontal_fov=1.57 rad
 
         self._flag_label = self.get_parameter("flag_label_id").value
