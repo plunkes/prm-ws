@@ -15,16 +15,12 @@ setup(
             os.path.join("share", package_name, "launch"),
             glob(os.path.join("launch", "*launch.[pxy][yma]*")),
         ),
-        (
-            os.path.join("share", package_name, "config"),
-            glob(os.path.join("config", "*.yaml")),
-        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="banoffee",
     maintainer_email="pedrolunkesvillela@usp.br",
-    description="Autonomous exploration and flag capture – FSM + Nav2 integration",
+    description="Controle autônomo – Wall Follower FSM + detecção visual de bandeira",
     license="Apache-2.0",
     extras_require={"test": ["pytest"]},
     entry_points={

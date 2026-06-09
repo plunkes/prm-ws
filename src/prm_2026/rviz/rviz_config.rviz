@@ -125,6 +125,11 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
+        upper_arm:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
       Mass Properties:
         Inertia: false
         Mass: false
@@ -162,13 +167,15 @@ Visualization Manager:
           Value: true
         lidar_link:
           Value: true
-        map:
-          Value: true
         odom:
+          Value: true
+        odom_gt:
           Value: true
         right_gripper:
           Value: true
         right_tip:
+          Value: true
+        upper_arm:
           Value: true
       Marker Scale: 0.30000001192092896
       Name: TF
@@ -176,33 +183,33 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        base_link:
-          base_footprint:
-            {}
-          camera_link:
-            camera_frame:
-              {}
-          drivewhl_l_link:
-            {}
-          drivewhl_r_link:
-            {}
-          front_caster:
-            {}
-          gripper_pole:
-            left_gripper:
-              left_tip:
-                {}
-            right_gripper:
-              right_tip:
-                {}
-          imu_link:
-            {}
-          lidar_link:
-            {}
-        map:
-          {}
         odom:
           {}
+        odom_gt:
+          base_link:
+            base_footprint:
+              {}
+            camera_link:
+              camera_frame:
+                {}
+            drivewhl_l_link:
+              {}
+            drivewhl_r_link:
+              {}
+            front_caster:
+              {}
+            imu_link:
+              {}
+            lidar_link:
+              {}
+            upper_arm:
+              gripper_pole:
+                left_gripper:
+                  left_tip:
+                    {}
+                right_gripper:
+                  right_tip:
+                    {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -277,7 +284,7 @@ Visualization Manager:
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: map
+    Fixed Frame: base_footprint
     Frame Rate: 30
   Name: root
   Tools:
