@@ -160,7 +160,7 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 2.0
-        inflation_radius: 0.45
+        inflation_radius: 0.35
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -209,7 +209,7 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 1.5
-        inflation_radius: 0.55
+        inflation_radius: 0.45
 
 # lifecycle_manager_navigation manages only the navigation stack.
 # Localization (map→odom TF) is provided by slam_toolbox, not AMCL.

@@ -11,7 +11,7 @@ Panels:
         - /Map1
         - /Path1
       Splitter Ratio: 0.5
-    Tree Height: 300
+    Tree Height: 182
   - Class: rviz_common/Views
     Expanded:
       - /Current View1
@@ -184,30 +184,7 @@ Visualization Manager:
       Tree:
         map:
           odom:
-            base_link:
-              base_footprint:
-                {}
-              camera_link:
-                camera_frame:
-                  {}
-              drivewhl_l_link:
-                {}
-              drivewhl_r_link:
-                {}
-              front_caster:
-                {}
-              imu_link:
-                {}
-              lidar_link:
-                {}
-              upper_arm:
-                gripper_pole:
-                  left_gripper:
-                    left_tip:
-                      {}
-                  right_gripper:
-                    right_tip:
-                      {}
+            {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -353,10 +330,11 @@ Visualization Manager:
       Enabled: true
       Name: FlagMarker
       Namespaces:
-        flag: true
+        {}
       Topic:
         Depth: 1
         Durability Policy: Transient Local
+        Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /flag_marker
@@ -413,14 +391,14 @@ Visualization Manager:
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 1014
+  Height: 474
   Hide Left Dock: false
   Hide Right Dock: false
   Image:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd000000010000000000000156000003a0fc0200000003fb000000100044006900730070006c006100790073010000003b000001ad000000c700fffffffb0000000a0049006d00610067006501000001ee000000610000002800fffffffb0000000a00560069006500770073010000025500000186000000a000ffffff000005b0000003a000000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd00000001000000000000015600000184fc0200000003fb000000100044006900730070006c006100790073010000003b00000137000000c700fffffffb0000000a0049006d0061006700650100000178000000470000002800fffffffb0000000a00560069006500770073000000011f000000a0000000a000ffffff000002090000018400000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
-  Width: 1804
-  X: 83
-  Y: 33
+  Width: 869
+  X: 103
+  Y: 553

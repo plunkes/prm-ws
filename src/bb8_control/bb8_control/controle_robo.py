@@ -497,6 +497,11 @@ class ControleRoboFSM(Node):
                     )
                     self._cancel_nav2()
                     self._clear_local_costmap()
+                    # Reset unconditionally BEFORE _transition so the watchdog
+                    # doesn't fire again immediately if the state doesn't change
+                    # (_transition returns early when old == new, skipping reset).
+                    self._watchdog_pos = None
+                    self._watchdog_last_moved = None
                     self._transition(recovery)
                     return
 
