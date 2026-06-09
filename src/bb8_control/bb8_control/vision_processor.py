@@ -66,9 +66,11 @@ class VisionProcessorNode(Node):
             ys, xs = np.where(flag_mask)
             cx = float(np.mean(xs))
             cy = float(np.mean(ys))
-            img_w = float(img.shape[1])
+            img_h, img_w = float(img.shape[0]), float(img.shape[1])
+            total_px = img_w * img_h
 
             bearing = (img_w / 2.0 - cx) / (img_w / 2.0) * (self._hfov / 2.0)
+            fraction_pct = area / total_px * 100.0
 
             pose_msg.x = cx
             pose_msg.y = float(area)
@@ -76,7 +78,8 @@ class VisionProcessorNode(Node):
             bearing_msg.data = float(bearing)
 
             self.get_logger().info(
-                f"Flag @ ({cx:.0f}, {cy:.0f})px  bearing={math.degrees(bearing):.1f}°  area={area}px",
+                f"Flag @ ({cx:.0f}, {cy:.0f})px  bearing={math.degrees(bearing):.1f}°"
+                f"  area={area}px ({fraction_pct:.2f}%)",
                 throttle_duration_sec=1.0,
             )
             scene_class = "objective"

@@ -274,9 +274,9 @@
       <!-- Interface de comando de velocidade angular (por exemplo, rad/s) para essa junta -->
       <command_interface name="velocity">
         <!-- Valor mínimo permitido para o comando de velocidade (limite inferior) -->
-        <param name="min">-10</param>
+        <param name="min">-15</param>
         <!-- Valor máximo permitido para o comando de velocidade (limite superior) -->
-        <param name="max">10</param>
+        <param name="max">15</param>
       </command_interface>
 
       <!-- Interface de estado que fornece a posição atual da junta (por exemplo, em radianos) -->
@@ -291,9 +291,9 @@
       <!-- Interface de comando de velocidade angular para essa junta -->
       <command_interface name="velocity">
         <!-- Limite inferior da velocidade que pode ser comandada -->
-        <param name="min">-10</param>
+        <param name="min">-15</param>
         <!-- Limite superior da velocidade que pode ser comandada -->
-        <param name="max">10</param>
+        <param name="max">15</param>
       </command_interface>
 
       <!-- Interface de estado para leitura da posição da junta -->

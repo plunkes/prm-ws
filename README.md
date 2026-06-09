@@ -13,20 +13,19 @@ ros-humble-diff-drive-controller
 ros-humble-joint-state-broadcaster
 ros-humble-position-controllers
 ros-humble-robot-state-publisher
-ros-humble-topic-tools
 python3-opencv
 python3-numpy
 ros-humble-cv-bridge
 ```
 
-Além disso é necessário o pacote prm_2026, uma modificação do [pacote da disciplina](https://github.com/matheusbg8/prm_2026)
+Além disso é necessário o pacote prm_2026, uma modificação do [pacote da disciplina](https://github.com/matheusbg8/prm_2026).
 
 Instalar dependências:
 
 ```bash
 sudo apt install ros-humble-ros-gz-bridge ros-humble-ros-gz-sim ros-humble-ign-ros2-control \
   ros-humble-diff-drive-controller ros-humble-joint-state-broadcaster \
-  ros-humble-position-controllers ros-humble-topic-tools ros-humble-cv-bridge \
+  ros-humble-position-controllers ros-humble-cv-bridge \
   python3-opencv python3-numpy
 ```
 
@@ -47,37 +46,41 @@ ros2 launch bb8_control missao_completa_launch.py
 
 O sistema tem dois nodos: `vision_processor` e `controle_robo`.
 
-**vision_processor** lê `/robot_cam/labels_map` (câmera semântica do Gazebo) a cada frame. Para cada pixel, verifica se o label corresponde à bandeira (label 25 = azul, já que é do time vermelho). Se a área de pixels detectados for maior que 40, calcula o centroide horizontal e converte para bearing em radianos. Publica em `/vision/flag_detection` (Pose2D com flag de detecção) e `/vision/flag_bearing` (Float32).
+**vision_processor** lê `/robot_cam/labels_map` (câmera semântica do Gazebo) a cada frame. Para cada pixel, verifica se o label corresponde à bandeira (label 25 = azul). Se a área de pixels detectados for maior que 40, calcula o centroide horizontal e converte para bearing em radianos. Publica em `/vision/flag_detection` (Pose2D: x=centroide, y=área em pixels, theta=1 se detectada) e `/vision/flag_bearing` (Float32).
 
 **controle_robo** roda a 20 Hz e implementa a FSM:
 
 ```
 SEGUINDO_PAREDE
-  ├─ sem parede no LIDAR (> 1.8m)  → avança reto a 0.35 m/s
+  ├─ sem parede no LIDAR (> 1.8m)  → avança reto a 0.6 m/s
   ├─ parede à direita detectada     → controle P: ω = -2.2 × (dist_direita - 0.5m)
-  ├─ obstáculo frontal < 0.4m      → para e gira esquerda (override de segurança)
+  ├─ obstáculo frontal < 0.4m      → para e gira (override de segurança)
   ├─ célula visitada ≥ 6 vezes     → EVITANDO_LOOP
   └─ bandeira detectada (≥ 40px)   → DETECTOU_BANDEIRA
 
 DETECTOU_BANDEIRA  (1 tick, apenas para logar a transição)
-  └─ sempre → NAVEGANDO_PARA_BANDEIRA  (braço se estende)
+  └─ sempre → NAVEGANDO_PARA_BANDEIRA
 
 NAVEGANDO_PARA_BANDEIRA
-  ├─ bandeira perdida por > 10 ticks → SEGUINDO_PAREDE  (braço recolhe)
-  ├─ alinhado (bearing < 0.06 rad) E frente < 1.0m → POSICIONANDO_FINAL
-  ├─ não alinhado → gira no lugar: ω = 1.8 × bearing
-  └─ alinhado     → avança a 0.28 m/s (reduz 40% se frente < 1.5m)
+  ├─ bandeira perdida por > 10 ticks → SEGUINDO_PAREDE
+  ├─ alinhado (bearing < 0.20 rad) E área ≥ 200px → POSICIONANDO_FINAL
+  ├─ obstáculo frontal < 0.65m      → modo contorno: wall-follow no lado mais livre
+  │    até o caminho desobstruir, depois retoma navegação direta
+  ├─ obstáculo frontal < 0.4m      → para e gira (segurança)
+  ├─ não alinhado → gira: ω = 1.8 × bearing
+  └─ alinhado, caminho livre → avança a 0.6 m/s
 
 POSICIONANDO_FINAL
-  ├─ frente > 0.75m → avança devagar (0.12 m/s) com correção de bearing
-  └─ frente ≤ 0.75m → para, imprime "Congratulations"
+  ├─ frente > 0.75m → avança devagar (0.15 m/s) com correção de bearing
+  ├─ frente ≤ 0.75m E bandeira detectada E área ≥ 200px → para, estende braço, "Congratulations"
+  └─ frente ≤ 0.75m E condição não atendida → era cilindro, volta a NAVEGANDO
 
 EVITANDO_LOOP
   ├─ fase 0: gira esquerda 2.5s
   └─ fase 1: avança reto 3.5s → SEGUINDO_PAREDE
 ```
 
-O braço é controlado via `/gripper_controller/commands`. Retraído: `[-1.5, -1.5, 0, 0]`. Estendido: `[0, 0, 0, 0]`. A ordem dos valores é `[gripper_extension, arm_elbow, right_gripper_joint, left_gripper_joint]`.
+O braço fica **retraído** durante toda a navegação e só se estende ao confirmar a missão completa. Posições: retraído `[-1.5, -1.5, 0, 0]`, estendido `[0, 0, 0, 0]`. Ordem: `[gripper_extension, arm_elbow, right_gripper_joint, left_gripper_joint]`.
 
 A posição do robô vem de `/odom_gt`, produzido pelo nodo `ground_truth_odometry` do pacote `prm_2026` a partir do ground truth do Gazebo.
 

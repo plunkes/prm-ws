@@ -51,8 +51,7 @@ def generate_launch_description():
         name="vision_processor",
         parameters=[
             {"use_sim_time": True},
-            # Labels da arena_cilindros.sdf: red_flag=20, blue_flag=25
-            {"flag_label_ids": [20, 25]},
+            {"flag_label_ids": [25]},
         ],
         output="screen",
     )
