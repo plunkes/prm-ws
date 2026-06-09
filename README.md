@@ -1,92 +1,94 @@
-# PRM - Programação de Robôs Móveis
+# bb8_control
 
-**Disciplina SSC0712**  
-Oferecida para os cursos de Engenharia de Computação e áreas afins na **USP São Carlos**
+Pacote de controle autônomo do robô para a disciplina SSC0712. O robô explora o ambiente seguindo paredes, detecta uma bandeira pela câmera semântica e navega até ela.
 
-Este repositório contém o material da disciplina *Programação de Robôs Móveis*, focada no desenvolvimento de soluções em robótica móvel utilizando **ROS 2 Humble** e o simulador **Gazebo Fortress**.
+## Requisitos
 
-## Tecnologias utilizadas
-
-- ROS 2 Humble
-- Gazebo Fortress
-- Python
-- RViz / Gazebo GUI
-- [teleop_twist_keyboard](https://github.com/ros2/teleop_twist_keyboard)
-
----
-
-## Como utilizar o pacote
-
-### 1. Clonar o repositório
-
-```bash
-git clone https://github.com/plunkes/prm-2026.git 
-````
-
-### 2. Instalar dependências
-
-Instale as dependências do pacote com:
-
-```bash
-cd prm-2026
-rosdep install --from-paths src --ignore-src -r -y
+```
+ROS 2 Humble
+ros-humble-ros-gz-bridge
+ros-humble-ros-gz-sim
+ros-humble-ign-ros2-control
+ros-humble-diff-drive-controller
+ros-humble-joint-state-broadcaster
+ros-humble-position-controllers
+ros-humble-robot-state-publisher
+ros-humble-topic-tools
+python3-opencv
+python3-numpy
+ros-humble-cv-bridge
 ```
 
-> Certifique-se de ter rodado previamente `sudo rosdep init` e `rosdep update`, se for a primeira vez usando o `rosdep`.
+Além disso é necessário o pacote prm_2026, uma modificação do [pacote da disciplina](https://github.com/matheusbg8/prm_2026)
 
-### 3. Compilar o workspace
-
-Certifique-se de estar na **raiz do seu workspace** (geralmente `~/ros2_ws`) antes de compilar:
+Instalar dependências:
 
 ```bash
-cd ~/prm_ws
-colcon build --symlink-install --packages-select prm_2026
+sudo apt install ros-humble-ros-gz-bridge ros-humble-ros-gz-sim ros-humble-ign-ros2-control \
+  ros-humble-diff-drive-controller ros-humble-joint-state-broadcaster \
+  ros-humble-position-controllers ros-humble-topic-tools ros-humble-cv-bridge \
+  python3-opencv python3-numpy
 ```
 
-### 4. Atualizar o ambiente do terminal
+## Compilar
 
 ```bash
-source install/local_setup.bash
+colcon build --packages-select bb8_control
+source install/setup.bash
 ```
 
----
-
-## Executando a simulação
-
-### 1. Iniciar o mundo no Gazebo
+## Rodar
 
 ```bash
-ros2 launch prm_2026 inicia_simulacao.launch.py
+ros2 launch bb8_control missao_completa_launch.py
 ```
 
-### 2. Carregar o robô no ambiente
+## Arquitetura e fluxo de controle
 
-Em um **novo terminal** (não se esqueça de `source install/local_setup.bash`):
+O sistema tem dois nodos: `vision_processor` e `controle_robo`.
 
-```bash
-ros2 launch prm_2026 carrega_robo.launch.py
+**vision_processor** lê `/robot_cam/labels_map` (câmera semântica do Gazebo) a cada frame. Para cada pixel, verifica se o label corresponde à bandeira (label 25 = azul, já que é do time vermelho). Se a área de pixels detectados for maior que 40, calcula o centroide horizontal e converte para bearing em radianos. Publica em `/vision/flag_detection` (Pose2D com flag de detecção) e `/vision/flag_bearing` (Float32).
+
+**controle_robo** roda a 20 Hz e implementa a FSM:
+
+```
+SEGUINDO_PAREDE
+  ├─ sem parede no LIDAR (> 1.8m)  → avança reto a 0.35 m/s
+  ├─ parede à direita detectada     → controle P: ω = -2.2 × (dist_direita - 0.5m)
+  ├─ obstáculo frontal < 0.4m      → para e gira esquerda (override de segurança)
+  ├─ célula visitada ≥ 6 vezes     → EVITANDO_LOOP
+  └─ bandeira detectada (≥ 40px)   → DETECTOU_BANDEIRA
+
+DETECTOU_BANDEIRA  (1 tick, apenas para logar a transição)
+  └─ sempre → NAVEGANDO_PARA_BANDEIRA  (braço se estende)
+
+NAVEGANDO_PARA_BANDEIRA
+  ├─ bandeira perdida por > 10 ticks → SEGUINDO_PAREDE  (braço recolhe)
+  ├─ alinhado (bearing < 0.06 rad) E frente < 1.0m → POSICIONANDO_FINAL
+  ├─ não alinhado → gira no lugar: ω = 1.8 × bearing
+  └─ alinhado     → avança a 0.28 m/s (reduz 40% se frente < 1.5m)
+
+POSICIONANDO_FINAL
+  ├─ frente > 0.75m → avança devagar (0.12 m/s) com correção de bearing
+  └─ frente ≤ 0.75m → para, imprime "Congratulations"
+
+EVITANDO_LOOP
+  ├─ fase 0: gira esquerda 2.5s
+  └─ fase 1: avança reto 3.5s → SEGUINDO_PAREDE
 ```
 
-### 3. Controle automático (demonstração)
+O braço é controlado via `/gripper_controller/commands`. Retraído: `[-1.5, -1.5, 0, 0]`. Estendido: `[0, 0, 0, 0]`. A ordem dos valores é `[gripper_extension, arm_elbow, right_gripper_joint, left_gripper_joint]`.
 
-Em outro terminal:
+A posição do robô vem de `/odom_gt`, produzido pelo nodo `ground_truth_odometry` do pacote `prm_2026` a partir do ground truth do Gazebo.
 
-```bash
-ros2 run prm_2026 controle_robo
-```
+## Tópicos relevantes
 
-### 4. **Controle manual (alternativa ao passo 3)**
-
-Você pode controlar o robô usando o teclado, como alternativa ao controle automático:
-
-```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard
-```
-
-#### Instalar `teleop_twist_keyboard` (caso não esteja disponível)
-
-```bash
-sudo apt install ros-humble-teleop-twist-keyboard
-```
-
-> **Importante**: execute **o passo 3 *ou* o passo 4**, dependendo se deseja usar o controle automático ou manual.
+| Tópico | Tipo | Direção |
+|---|---|---|
+| `/scan` | LaserScan | entrada |
+| `/odom_gt` | Odometry | entrada |
+| `/robot_cam/labels_map` | Image | entrada |
+| `/vision/flag_detection` | Pose2D | saída vision |
+| `/vision/flag_bearing` | Float32 | saída vision |
+| `/cmd_vel` | Twist | saída controle |
+| `/gripper_controller/commands` | Float64MultiArray | saída controle |
