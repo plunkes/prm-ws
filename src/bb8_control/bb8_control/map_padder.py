@@ -97,6 +97,12 @@ class MapPadder(Node):
         out.info.origin.position.z = 0.0
         out.info.origin.orientation.w = 1.0
         out.data = out_arr.flatten().tolist()
+        free_cells = int(np.count_nonzero(out_arr == 0))
+        self.get_logger().info(
+            f"[map_padder] publishing {self._pad_w}×{self._pad_h} map, "
+            f"free={free_cells} occ={int(np.count_nonzero(out_arr == 100))} "
+            f"unk={int(np.count_nonzero(out_arr == -1))}"
+        )
         self._pub.publish(out)
 
 

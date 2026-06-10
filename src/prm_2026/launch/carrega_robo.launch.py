@@ -90,34 +90,6 @@ def generate_launch_description():
         output="screen",
     )
 
-    # Redireciona as mensagens do topico /diff_drive_base_controller/odom para /odom (Conveniencia)
-    relay_odom = Node(
-        name="relay_odom",
-        package="topic_tools",
-        executable="relay",
-        parameters=[
-            {
-                "input_topic": "/diff_drive_base_controller/odom",
-                "output_topic": "/odom",
-            }
-        ],
-        output="screen",
-    )
-
-    # Redireciona as mensagens do topico /cmd_vel para /diff_drive_base_controller/cmd_vel_unstamped (Conveniencia)
-    relay_cmd_vel = Node(
-        name="relay_cmd_vel",
-        package="topic_tools",
-        executable="relay",
-        parameters=[
-            {
-                "input_topic": "/cmd_vel",
-                "output_topic": "/diff_drive_base_controller/cmd_vel_unstamped",
-            }
-        ],
-        output="screen",
-    )
-
     # ------------------------------------------------------
     # RViz: visualização do robô
     # ------------------------------------------------------
@@ -174,7 +146,7 @@ def generate_launch_description():
         executable="parameter_bridge",
         name="ros_gz_bridge_prm_robot",
         arguments=[
-            "/scan@sensor_msgs/msg/LaserScan@ignition.msgs.LaserScan",
+            "/scan@sensor_msgs/msg/LaserScan[ignition.msgs.LaserScan",
             "/imu@sensor_msgs/msg/Imu@ignition.msgs.IMU",
             # Camera normal
             # "/robot_cam@sensor_msgs/msg/Image@ignition.msgs.Image",
@@ -257,8 +229,6 @@ def generate_launch_description():
             # odom_gt,
             # robo_mapper,
             rviz_node,
-            relay_odom,
-            relay_cmd_vel,
             #      controle
         ]
     )

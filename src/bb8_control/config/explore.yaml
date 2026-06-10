@@ -1,8 +1,8 @@
 explore_node:
   ros__parameters:
     robot_base_frame: base_link
-    costmap_topic: /global_costmap/costmap
-    costmap_updates_topic: /global_costmap/costmap_updates
+    costmap_topic: /map_padded
+    costmap_updates_topic: /map_padded_updates
     visualize: true
 
     # 0.5 Hz: re-evaluate frontiers every 2 s. At 0.5 m/s the robot travels ~1 m
@@ -30,7 +30,6 @@ explore_node:
     min_frontier_size: 0.5
 
     return_to_init: false
-    use_relative_frontiers: false
 
     # Penalise frontiers that require a large rotation from the robot's current
     # heading. Cost += orientation_scale * |heading_error_rad|. At 0.5 a full
